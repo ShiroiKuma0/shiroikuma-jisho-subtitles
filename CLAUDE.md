@@ -41,6 +41,13 @@ SRTs covering a twentieth of the book. `check_decode()` exists so the next such
 file is a warning on the first file rather than a discovery after a full run;
 do not remove it because it "never fires".
 
+**`_reattach_orphans`** in `segment.py`.  Segmenters return the stray closing
+quote or dash that dialogue formatting leaves behind; «Also sprach Zarathustra»
+produced 352 of them.  Each became a subtitle showing a single punctuation mark,
+timed by interpolation because it matched no audio, and the app stopped playback
+on it.  Folding them back lifted that book from 91.7 % placed to 96.6 % and cut
+interpolated cues from 363 to 66.
+
 **`_snap_start`** in `refine.py`. Whisper emits words that are not there,
 typically a few milliseconds *before* a pause rather than inside it, which is
 why the test covers a fragment-then-pause case and not just "start is in

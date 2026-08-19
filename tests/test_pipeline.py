@@ -322,3 +322,21 @@ def test_full_decode_is_not_reported():
     assert check_decode("x.mp3", np.zeros(16000 * 100, dtype=np.float32),
                         expected=100.0, log=messages.append) is True
     assert messages == []
+
+
+def test_orphan_punctuation_never_becomes_a_cue():
+    """Zarathustra's dialogue leaves 352 fragments like `”` and `-` behind."""
+    from jisho_subs.segment import split_block
+    pieces = split_block('Er sprach. ” - Dann ging er.', "de")
+    assert all(any(ch.isalnum() for ch in p) for p in pieces), pieces
+
+
+def test_orphan_punctuation_is_kept_not_discarded():
+    from jisho_subs.segment import split_block
+    joined = " ".join(split_block('Er sprach. ” Dann ging er.', "de"))
+    assert "”" in joined, "the mark belongs to the text and must survive"
+
+
+def test_a_one_word_sentence_is_still_a_sentence():
+    from jisho_subs.segment import split_block
+    assert "Wehe!" in split_block("Wehe! Der Tag kommt.", "de")
