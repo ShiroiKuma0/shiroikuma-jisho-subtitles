@@ -381,3 +381,15 @@ def test_progress_degrades_to_plain_lines_when_not_a_terminal():
     assert "\r" not in text, "carriage returns must not reach a log file"
     assert text.count("\n") <= 12, "a log must not get one line per item"
     assert "10/10" in text
+
+
+def test_implausibly_short_interpolations_are_reported():
+    from jisho_subs.report import implausible
+
+    real = align_mod.Cue(Sentence("Ein recht langer deutscher Satz mit vielen Woertern darin.",
+                                  "c", False, 0), 0, 0.0, 8.0, 1.0)
+    squeezed = align_mod.Cue(Sentence("Ein recht langer deutscher Satz mit vielen Woertern darin.",
+                                      "c", False, 1), 0, 8.0, 8.3, 0.0, True)
+    fine = align_mod.Cue(Sentence("Kurz.", "c", False, 2), 0, 9.0, 10.0, 0.0, True)
+    out = implausible([real, squeezed, fine], "de")
+    assert len(out) == 1 and out[0][0] is squeezed

@@ -18,6 +18,36 @@ from .audio import format_hms
 from .srt import WriteStats
 
 
+#: Faster than any narrator manages — chars/s for character languages, words/s
+#: otherwise.  A cue allotted less time than this cannot be what was spoken.
+_CEILING = {"ja": 14.0, "zh": 14.0}
+_CEILING_DEFAULT = 5.0
+
+
+def implausible(cues, lang: str, margin: float = 0.7):
+    """Interpolated cues too short for their own text to have been read.
+
+    These arise when two matched neighbours sit almost adjacent in time but
+    have unmatched sentences between them: the proportional share collapses to
+    the minimum cue length.  The text is real, so it is not dropped — but the
+    timing is wrong, and the app will flash it for a third of a second and stop.
+    Worth naming rather than shipping quietly.
+    """
+    ceiling = _CEILING.get(lang, _CEILING_DEFAULT)
+    out = []
+    for c in cues:
+        if c is None or not c.interpolated:
+            continue
+        size = (len(c.sentence.text) if lang in _CEILING
+                else len(c.sentence.text.split()))
+        needed = size / ceiling
+        got = c.end - c.start
+        if got < needed * margin:
+            out.append((c, got, needed))
+    out.sort(key=lambda t: t[1] / max(t[2], 1e-6))
+    return out
+
+
 def _pct(part: int, whole: int) -> str:
     return f"{100.0 * part / whole:.1f}%" if whole else "n/a"
 
@@ -102,6 +132,19 @@ def build(book: str, lang: str, source: str, files, sentences,
             add(f"      {name}")
         if len(write_stats.empty_files) > 6:
             add(f"      … and {len(write_stats.empty_files) - 6} more")
+
+    suspect = implausible(cues, lang)
+    if suspect:
+        add("")
+        add(f"  SUSPECT TIMINGS ({len(suspect)} cues, text is right, timing is not)")
+        add("    These sat between neighbours with no room between them, so they")
+        add("    were squeezed to the minimum cue length. Check if a passage feels off.")
+        for c, got, needed in suspect[:8]:
+            add(f"    {got:5.2f}s given, ~{needed:4.1f}s needed  "
+                f"[{files[c.file_index].name[:28]} @ {format_hms(c.start)}]")
+            add(f"          {c.sentence.text[:62]}")
+        if len(suspect) > 8:
+            add(f"    … and {len(suspect) - 8} more")
 
     weak = sorted((c for c in matched if c.confidence < 0.75),
                   key=lambda c: c.confidence)[:low_confidence]

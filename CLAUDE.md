@@ -62,6 +62,17 @@ worst case, 318 000 × 306 000 characters, 44.9 s, 40 MB peak). Chapter matching
 is exactly what makes subplz fail when audio files and text chapters do not
 correspond — which is the normal case.
 
+## Known cost
+
+The whole-book alignment is fast for word languages (~1 s) but takes **several
+minutes on Japanese**, far more than the synthetic benchmark suggested. Real
+Japanese is dominated by a handful of very frequent characters, and with
+`autojunk=False` — which is mandatory — `difflib` builds huge occurrence lists
+for them. It is a once-per-book cost, cached afterwards, and the spinner makes
+it visible. If it ever needs fixing, run the anchor pass over character 4-grams
+rather than single characters: same sequence length, far more distinctive
+tokens.
+
 ## Validation corpus
 
 `~/tmp/subtitles/{1..5}` — German (111 MP3), Polish (23 MP3), Japanese (24 M4B,
