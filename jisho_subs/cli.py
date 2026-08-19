@@ -104,12 +104,26 @@ def cmd_probe(args) -> int:
     return 0
 
 
+def _resolve_reference_only(args) -> str:
+    """The reference file alone — `sentences` needs no audio."""
+    from .source import find_source
+    if args.epub:
+        if not os.path.exists(args.epub):
+            die(f"reference file does not exist: {args.epub}")
+        return args.epub
+    if not args.directory or not os.path.isdir(args.directory):
+        die("pass --epub, or -d pointing at the book directory")
+    source = find_source(os.path.abspath(args.directory))
+    if not source:
+        die(f"no EPUB or PDF in {args.directory}")
+    return source
+
+
 def cmd_sentences(args) -> int:
     from .source import load_source
     from .segment import segment
 
-    source, _files = (args.epub or _resolve_inputs(args)[0], None) \
-        if args.epub else _resolve_inputs(args)
+    source = _resolve_reference_only(args)
     lang = _resolve_language(args, source)
     dropped: List[tuple] = []
     blocks = load_source(source, lambda d, n, r: dropped.append((d, n, r)))
@@ -213,9 +227,9 @@ def cmd_run(args) -> int:
 
     step("5/5  writing subtitles")
     if args.dry_run:
+        from .srt import WriteStats
         log(f"  {C.WARN}dry run — nothing written{C.RESET}")
-        write_stats = type("W", (), {"cues": 0, "files": 0, "merged_identical": 0,
-                                     "neutralised_markup": 0, "empty_files": []})()
+        write_stats = WriteStats()
     else:
         write_stats = write_for_files(cues, files, args.out,
                                       log=lambda m: log(m) if args.verbose else None)

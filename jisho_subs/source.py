@@ -32,7 +32,16 @@ from typing import List, Optional
 
 from bs4 import BeautifulSoup
 
-warnings.filterwarnings("ignore", module="bs4")
+try:
+    from bs4 import XMLParsedAsHTMLWarning
+except ImportError:                          # pragma: no cover - older bs4
+    XMLParsedAsHTMLWarning = None
+
+# bs4 notices that EPUB content is XHTML and advises parsing it as XML.  Taking
+# that advice is the bug: XML mode preserves <rt>, so Japanese ruby readings end
+# up spliced into the prose.  HTML mode is the deliberate choice here.
+if XMLParsedAsHTMLWarning is not None:
+    warnings.filterwarnings("ignore", category=XMLParsedAsHTMLWarning)
 
 #: Leaf-level block elements.  A match is only used when it contains no other
 #: block, so nested containers do not produce duplicate text.
