@@ -79,9 +79,14 @@ def _resolve_inputs(args):
     if not audio_root or not os.path.isdir(audio_root):
         die("no audio directory; pass --audio or -d")
 
-    files = discover(audio_root)
+    shadowed: List[str] = []
+    files = discover(audio_root, on_shadow=shadowed.extend)
     if not files:
         die(f"no audio files under {audio_root}")
+    if shadowed:
+        # The tool ignores the superseded copies; the app will not.
+        log(f"{C.DIM}ignoring {len(shadowed)} superseded file(s) "
+            f"(a seek-accurate copy of each exists){C.RESET}")
     return source, files
 
 
@@ -238,8 +243,9 @@ def cmd_run(args) -> int:
         if not have_ffmpeg():
             die("ffmpeg is needed to convert MP3 to M4B; pass --keep-mp3 to skip")
         out_dir = args.convert_to or target_dir(stale)
-        log(f"  the app cannot seek MP3 accurately, so auto-pause would fire at")
-        log(f"  the wrong sentence boundaries. Originals are kept untouched.")
+        log("  the app cannot seek MP3 accurately, so auto-pause would fire at")
+        log("  the wrong sentence boundaries. The M4B is written beside each")
+        log("  MP3 under the same name; the MP3 itself is left untouched.")
         log(f"  → {out_dir}")
         cbar = Progress(len(stale), "converting", tag=f"{C.TAG}[jisho-subs]{C.RESET} ")
         result = convert(stale, out_dir, jobs=args.jobs, force=args.force,
@@ -253,6 +259,15 @@ def cmd_run(args) -> int:
             die(f"{len(result.failed)} file(s) failed to convert")
         files = _rediscover(result.out_dir)
         log(f"  now working on {len(files)} M4B files")
+        if result.made or result.skipped:
+            mp3s = os.path.join(out_dir, "*.mp3")
+            log("")
+            log(f"  {C.WARN}the MP3s are still there, and the app lists every audio")
+            log(f"  file in the folder — so its chapter list will show each track")
+            log(f"  twice until you remove them:{C.RESET}")
+            log(f"    rm {mp3s}")
+            log(f"  {C.DIM}(deliberately not done for you — deleting your audio is "
+                f"your call){C.RESET}")
 
     step(f"reading {os.path.basename(source)}")
     dropped_docs: List[tuple] = []

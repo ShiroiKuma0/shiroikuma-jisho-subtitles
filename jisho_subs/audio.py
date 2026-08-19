@@ -23,6 +23,11 @@ from typing import List, Optional
 #: What the app itself will open, plus opus.
 AUDIO_EXTS = {".mp3", ".m4a", ".m4b", ".ogg", ".opus", ".wav", ".flac", ".aac"}
 
+#: Containers carrying a sample-accurate index.  MP3 does not: the Android
+#: player estimates the seek target from average bitrate, lands seconds away,
+#: and auto-pause then fires at the wrong sentence.
+SEEK_ACCURATE = {".m4a", ".m4b", ".mp4", ".aac", ".ogg", ".opus", ".flac", ".wav"}
+
 _NUM = re.compile(r"(\d+)")
 
 
@@ -87,14 +92,7 @@ def _audio_in(directory: str) -> List[str]:
 
 
 def _seekable_share(paths: List[str]) -> float:
-    """Fraction of files in a container that can be seeked accurately.
-
-    MP3 cannot: the Android player estimates the target from average bitrate
-    and lands seconds away, which makes auto-pause fire at the wrong sentence.
-    So when a book directory offers both an MP3 set and a converted M4B set,
-    the M4B set is the one to work on.
-    """
-    from .convert import SEEK_ACCURATE
+    """Fraction of a set that can be seeked accurately."""
     if not paths:
         return 0.0
     good = sum(1 for p in paths
@@ -102,7 +100,36 @@ def _seekable_share(paths: List[str]) -> float:
     return good / len(paths)
 
 
-def discover(directory: str, on_choice=None) -> List[AudioFile]:
+def prefer_seekable(paths: List[str], on_shadow=None) -> List[str]:
+    """Where a track exists twice, keep the seek-accurate copy.
+
+    Converted books hold `001 Track.mp3` and `001 Track.m4b` side by side in one
+    folder.  Both are the same audio, so processing both would double every
+    chapter; the M4B is the one the app can seek, so it wins and the MP3 is
+    shadowed.
+    """
+    by_stem: dict = {}
+    for path in paths:
+        stem = os.path.splitext(os.path.basename(path))[0]
+        by_stem.setdefault(stem, []).append(path)
+
+    kept, shadowed = [], []
+    for stem in sorted(by_stem, key=natural_key):
+        group = by_stem[stem]
+        if len(group) == 1:
+            kept.append(group[0])
+            continue
+        good = [p for p in group
+                if os.path.splitext(p)[1].lower() in SEEK_ACCURATE]
+        winner = good[0] if good else group[0]
+        kept.append(winner)
+        shadowed.extend(p for p in group if p != winner)
+    if shadowed and on_shadow:
+        on_shadow(shadowed)
+    return kept
+
+
+def discover(directory: str, on_choice=None, on_shadow=None) -> List[AudioFile]:
     """Find a book's audio, in natural order.
 
     Accepts either the directory holding the audio, or a book directory with
@@ -133,6 +160,7 @@ def discover(directory: str, on_choice=None) -> List[AudioFile]:
                 on_choice(groups[0][0], [g[0] for g in groups[1:]])
         paths = groups[0][1]
 
+    paths = prefer_seekable(paths, on_shadow)
     files = []
     for path in paths:
         info = probe(path)

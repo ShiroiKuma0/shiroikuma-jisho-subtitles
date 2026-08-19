@@ -13,8 +13,9 @@ fires at the wrong boundary, precisely-aligned subtitles are wasted.  MP4 keeps
 a sample-accurate index, so seeks land where they are asked to.
 
 The command is the app's own recommendation, verbatim, so the two stay in step.
-Originals are never touched: the M4Bs are written to a sibling directory and the
-MP3s stay exactly where they were.
+Originals are never touched.  The M4B is written beside its MP3, under the same
+basename, so one SRT serves either; the MP3 stays exactly where it was, and
+deleting it is 白い熊's decision to make.
 """
 
 from __future__ import annotations
@@ -26,15 +27,10 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from typing import List, Optional, Sequence
 
-from .audio import AudioFile, probe
-
-#: Containers that already carry a sample-accurate index.
-SEEK_ACCURATE = {".m4a", ".m4b", ".mp4", ".aac", ".ogg", ".opus", ".flac", ".wav"}
+from .audio import SEEK_ACCURATE, AudioFile, probe
 
 #: What the app's dialog recommends.
 BITRATE = "128k"
-
-SUFFIX = " [m4b]"
 
 
 @dataclass
@@ -51,9 +47,15 @@ def needs_conversion(files: Sequence[AudioFile]) -> List[AudioFile]:
 
 
 def target_dir(files: Sequence[AudioFile]) -> str:
-    """A sibling directory beside the audio, so the originals stay put."""
-    src = os.path.dirname(os.path.abspath(files[0].path))
-    return src + SUFFIX
+    """The audio's own directory — one folder per book, as 白い熊 keeps them.
+
+    The M4B lands beside the MP3 it came from, sharing its basename, so the
+    same SRT pairs with either.  The MP3 is left in place; removing it is 白い熊's
+    call, not the tool's.  Until it goes, the app's chapter list will show both
+    copies of every track — the tool itself ignores the MP3 (see
+    ``audio.prefer_seekable``).
+    """
+    return os.path.dirname(os.path.abspath(files[0].path))
 
 
 def _convert_one(src: str, dst: str) -> Optional[str]:

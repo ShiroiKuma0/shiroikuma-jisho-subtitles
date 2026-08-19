@@ -468,3 +468,40 @@ def test_discover_prefers_the_seekable_directory(tmp_path):
     assert all(f.path.endswith(".m4b") for f in found), \
         "the MP3 set must not be chosen once an M4B set exists"
     assert len(found) == 2, "the two sets must not be concatenated"
+
+
+def test_the_m4b_lands_beside_its_mp3(tmp_path):
+    from jisho_subs.audio import probe
+    from jisho_subs.convert import convert, have_ffmpeg, target_dir
+    if not have_ffmpeg():
+        pytest.skip("ffmpeg not available")
+    src = probe(_make_mp3(tmp_path / "001 Track.mp3", seconds=1))
+    assert target_dir([src]) == str(tmp_path), "no sibling directory is created"
+    convert([src], target_dir([src]))
+    assert (tmp_path / "001 Track.m4b").exists()
+    assert (tmp_path / "001 Track.mp3").exists()
+
+
+def test_the_mp3_twin_is_shadowed_not_processed_twice(tmp_path):
+    """After converting in place both copies sit in one folder."""
+    from jisho_subs.audio import discover, probe
+    from jisho_subs.convert import convert, have_ffmpeg, target_dir
+    if not have_ffmpeg():
+        pytest.skip("ffmpeg not available")
+    for i in (1, 2):
+        _make_mp3(tmp_path / f"{i:02d} Track.mp3", seconds=1)
+    srcs = [probe(str(tmp_path / f"{i:02d} Track.mp3")) for i in (1, 2)]
+    convert(srcs, target_dir(srcs))
+
+    shadowed = []
+    found = discover(str(tmp_path), on_shadow=shadowed.extend)
+    assert len(found) == 2, "each track must be processed once, not twice"
+    assert all(f.path.endswith(".m4b") for f in found)
+    assert len(shadowed) == 2 and all(p.endswith(".mp3") for p in shadowed)
+
+
+def test_a_lone_mp3_is_still_used(tmp_path):
+    from jisho_subs.audio import discover
+    _make_mp3(tmp_path / "solo.mp3", seconds=1)
+    found = discover(str(tmp_path))
+    assert len(found) == 1 and found[0].path.endswith(".mp3")

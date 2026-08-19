@@ -57,9 +57,12 @@ silence".
 (`_showMp3SeekWarningDialog`) states that with MP3 "auto-pause will fire at the
 wrong sentence boundaries" — so precisely-aligned cues are wasted on MP3. The
 ffmpeg invocation in `convert.py` is copied from that dialog verbatim; keep the
-two in step if the app changes it. Conversion writes to a sibling `… [m4b]`
-directory and never touches the originals, which is also why `discover()` picks
-one directory rather than concatenating: a converted book has both sets.
+two in step if the app changes it. Conversion writes the M4B **beside its MP3**, same
+basename, and never touches the original — so one folder ends up holding both
+copies of every track. `audio.prefer_seekable()` is what stops the tool
+processing each track twice; the app has no such filter, so its chapter list
+shows both until 白い熊 removes the MP3s, and the tool prints that command
+without running it.
 
 Do not reuse MP3-derived SRTs against the M4B — AAC encoder delay shifts the
 duration (238.315 s → 238.277 s on the first Lázár track), so the timings are
@@ -96,9 +99,12 @@ case the code guards against. Re-check against all five after touching
 ## Running it
 
 ```
-PYTHONPATH=. ~/jisho-subs-venv/bin/python -m jisho_subs run -d ~/tmp/subtitles/1
-PYTHONPATH=. ~/jisho-subs-venv/bin/python -m pytest -q
+shiroikuma-jisho-subtitles -d ~/tmp/subtitles/1     # ~/0/bin, wraps the venv
+~/jisho-subs-venv/bin/python -m pytest -q
 ```
+
+`bin/shiroikuma-jisho-subtitles` carries the full `-h`; keep it in step with the
+argparse options when adding flags.
 
 Transcripts and VAD results cache in `~/.cache/jisho-subs`; runs after the first
 skip the GPU work entirely. Use `--force` to re-transcribe.

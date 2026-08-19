@@ -4,7 +4,7 @@ Turn an EPUB and its audiobook into **one-sentence-per-cue SRT files** for
 [shiroikuma-jisho](https://github.com/shiroikuma/shiroikuma-jisho).
 
 ```
-jisho-subs -d ~/books/Lázár
+shiroikuma-jisho-subtitles -d ~/books/Lázár
 ```
 
 One command. Whatever EPUB, whatever audio — one file or a hundred and eleven —
@@ -42,8 +42,11 @@ text is the **book's own**, not the transcriber's.
   extension lies about their container, and 1883 German orthography.
 - **MP3 audio.** The app cannot seek MP3 — its own warning says auto-pause
   "will fire at the wrong sentence boundaries", which defeats the whole point of
-  aligning them precisely. MP3 books are converted to M4B first, into a sibling
-  `… [m4b]` directory; the originals are never touched. `--keep-mp3` opts out.
+  aligning them precisely. MP3 books are converted to M4B **first**, before
+  anything else, and the M4B is written beside its MP3 under the same basename.
+  Your MP3s are never touched or deleted; the tool ignores them once an M4B
+  exists and prints the command to remove them if you want to.
+  `--keep-mp3` opts out.
 - **Damaged files.** Audio is decoded through ffmpeg and the result checked
   against the container's own duration, because a decoder that quietly returns
   five per cent of a file still produces a full set of confident-looking SRTs.
@@ -52,9 +55,11 @@ text is the **book's own**, not the transcriber's.
 
 ```
 python3 -m venv ~/jisho-subs-venv
-~/jisho-subs-venv/bin/pip install -e .
-ln -s ~/jisho-subs-venv/bin/jisho-subs ~/0/bin/
+~/jisho-subs-venv/bin/pip install -e '.[cuda]'
+ln -s "$PWD/bin/shiroikuma-jisho-subtitles" ~/0/bin/
 ```
+
+`shiroikuma-jisho-subtitles -h` documents the whole pipeline and every option.
 
 `ffmpeg` and `ffprobe` must be on `PATH`. A CUDA GPU is optional but worth
 having: `large-v3` runs at ~3.9× realtime on 24 CPU cores and ~86× realtime on
@@ -63,16 +68,16 @@ an RTX 5090, so a 7¾-hour book is two hours or five minutes.
 ## Use
 
 ```
-jisho-subs -d BOOKDIR                  # language read from the EPUB metadata
-jisho-subs -d BOOKDIR -l de            # or state it
-jisho-subs -d BOOKDIR --report r.txt   # keep the run report
-jisho-subs -d BOOKDIR --no-refine      # skip pause snapping
-jisho-subs -d BOOKDIR --dry-run        # align, report, write nothing
+shiroikuma-jisho-subtitles -d BOOKDIR                # language read from the EPUB
+shiroikuma-jisho-subtitles -d BOOKDIR -l de          # or state it
+shiroikuma-jisho-subtitles -d BOOKDIR --report r.txt # keep the run report
+shiroikuma-jisho-subtitles -d BOOKDIR --keep-mp3     # do not convert to M4B
+shiroikuma-jisho-subtitles -d BOOKDIR --dry-run      # align, report, write nothing
 
-jisho-subs convert   -d BOOKDIR        # only convert MP3 → M4B, then stop
-jisho-subs sentences -d BOOKDIR        # the reference text, as it will be cued
-jisho-subs probe     -d BOOKDIR        # what would be used
-jisho-subs lint      AUDIODIR          # check SRTs against the app's parser
+shiroikuma-jisho-subtitles convert   -d BOOKDIR      # only MP3 → M4B, then stop
+shiroikuma-jisho-subtitles sentences -d BOOKDIR      # the text, as it will be cued
+shiroikuma-jisho-subtitles probe     -d BOOKDIR      # what would be used
+shiroikuma-jisho-subtitles lint      AUDIODIR        # check the app's SRT contract
 ```
 
 `BOOKDIR` holds the EPUB (or PDF) and the audio, either loose or in one
