@@ -1,0 +1,33 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "jisho-subs"
+version = "0.1.0"
+description = "Sentence-aligned SRTs from an EPUB and its audiobook, for shiroikuma-jisho"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "白い熊" }]
+dependencies = [
+    "beautifulsoup4>=4.12",
+    "lxml>=5.0",
+    "pysbd>=0.3.4",
+    "RapidFuzz>=3.9",
+    "faster-whisper>=1.1",
+    "num2words>=0.5.13",
+]
+
+[project.optional-dependencies]
+# CTranslate2 loads these by soname at runtime; jisho_subs.cuda puts them on
+# LD_LIBRARY_PATH.  Normally they arrive as torch dependencies — this package
+# does not use torch, so it asks for them directly.
+cuda = ["nvidia-cublas-cu12", "nvidia-cudnn-cu12"]
+dev = ["pytest>=7.4"]
+
+[project.scripts]
+jisho-subs = "jisho_subs.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["jisho_subs*"]
