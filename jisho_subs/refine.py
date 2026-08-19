@@ -132,7 +132,7 @@ def _snap_start(t: float, gaps: Sequence[Tuple[float, float]],
 
 
 def refine(cues: Sequence[Optional[Cue]], files, cache_dir: Optional[str] = None,
-           force: bool = False, log=None) -> Dict[int, int]:
+           force: bool = False, log=None, on_file=None) -> Dict[int, int]:
     """Snap every cue end to a pause.  Returns per-file counts of cues moved."""
     log = log or (lambda *a, **k: None)
     used = sorted({c.file_index for c in cues if c is not None})
@@ -140,13 +140,19 @@ def refine(cues: Sequence[Optional[Cue]], files, cache_dir: Optional[str] = None
 
     for fi in used:
         audio = files[fi]
+        if on_file is not None:
+            on_file("start", audio)
         try:
             speech = speech_intervals(audio.path, cache_dir, force)
         except Exception as exc:
             log(f"  VAD failed on {audio.name}: {exc}")
+            if on_file is not None:
+                on_file("done", audio)
             continue
         gaps = _silences(speech, audio.duration)
         if not gaps:
+            if on_file is not None:
+                on_file("done", audio)
             continue
         count = 0
         own = [c for c in cues if c is not None and c.file_index == fi]
@@ -171,4 +177,6 @@ def refine(cues: Sequence[Optional[Cue]], files, cache_dir: Optional[str] = None
             if cue.end - cue.start < MIN_CUE:
                 cue.end = min(cue.start + MIN_CUE, audio.duration)
         moved[fi] = count
+        if on_file is not None:
+            on_file("done", audio)
     return moved

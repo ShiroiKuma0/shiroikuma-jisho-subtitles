@@ -126,7 +126,8 @@ def render(cues: Sequence[Cue]) -> str:
 
 
 def write_for_files(cues: Sequence[Optional[Cue]], files, out_dir: Optional[str],
-                    stats: Optional[WriteStats] = None, log=None) -> WriteStats:
+                    stats: Optional[WriteStats] = None, log=None,
+                    on_file=None) -> WriteStats:
     """Write one SRT per audio file, named after the audio file.
 
     The app pairs audio with subtitles by identical basename in the same
@@ -151,12 +152,16 @@ def write_for_files(cues: Sequence[Optional[Cue]], files, out_dir: Optional[str]
             # instance — so say so rather than failing.
             stats.empty_files.append(audio.name)
             log(f"  no text  {audio.name}")
+            if on_file is not None:
+                on_file(audio.name)
             continue
         with open(path, "w", encoding="utf-8", newline="\n") as fh:
             fh.write(render(prepared))
         stats.cues += len(prepared)
         stats.files += 1
         log(f"  wrote    {os.path.basename(path)}  ({len(prepared)} cues)")
+        if on_file is not None:
+            on_file(audio.name)
     return stats
 
 

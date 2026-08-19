@@ -77,6 +77,11 @@ class Transcriber:
         self.log = log or (lambda *a, **k: None)
         self._model = None
         self._pipeline = None
+        #: Whether the most recent transcribe() came from the cache.  The
+        #: throughput figure must not count cached files, or a re-run reports
+        #: an absurd "147000x realtime".
+        self.last_cached = False
+        self.cache_hits = 0
         self.device, self.compute_type = self._resolve_device(device, compute_type)
 
     @staticmethod
@@ -143,10 +148,12 @@ class Transcriber:
     def transcribe(self, audio: AudioFile, language: str,
                    force: bool = False) -> Transcript:
         cache_path = self._cache_path(audio.path, language)
+        self.last_cached = False
         if not force:
             cached = self._load_cached(cache_path)
             if cached is not None:
-                self.log(f"  cached   {audio.name}")
+                self.last_cached = True
+                self.cache_hits += 1
                 return cached
 
         self._ensure_model()

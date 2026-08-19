@@ -340,3 +340,44 @@ def test_orphan_punctuation_is_kept_not_discarded():
 def test_a_one_word_sentence_is_still_a_sentence():
     from jisho_subs.segment import split_block
     assert "Wehe!" in split_block("Wehe! Der Tag kommt.", "de")
+
+
+# -- progress display ----------------------------------------------------
+
+def test_filename_is_trimmed_from_the_middle():
+    """`…N82531555.mp3` identifies nothing; the track number is at the front."""
+    from jisho_subs.progress import shorten
+    out = shorten("001_111_9783732422098_DEXN82531555.mp3", 24)
+    assert out.startswith("001_111_")
+    assert out.endswith(".mp3")
+    assert len(out) <= 24
+
+
+def test_progress_line_fits_the_terminal_and_keeps_the_filename():
+    import io
+    from jisho_subs.progress import Progress
+
+    for width in (170, 140, 120, 100, 88, 76):
+        p = Progress(111, "transcribing", tag="[jisho-subs] ",
+                     stream=io.StringIO(), enabled=True)
+        p.done, p.weight, p.started = 14, 3500.0, p.started - 30
+        line = p._compose("014_111_9783732422098_DEXN82531614.mp3", width)
+        assert len(line) <= width, f"{width}: overflowed by {len(line) - width}"
+        assert "14/111" in line
+        if width >= 76:
+            assert "014_111" in line, f"{width}: lost the filename"
+
+
+def test_progress_degrades_to_plain_lines_when_not_a_terminal():
+    import io
+    from jisho_subs.progress import Progress
+
+    out = io.StringIO()
+    p = Progress(10, "transcribing", stream=out, enabled=False)
+    for i in range(10):
+        p.advance(f"file{i}.mp3")
+    p.close()
+    text = out.getvalue()
+    assert "\r" not in text, "carriage returns must not reach a log file"
+    assert text.count("\n") <= 12, "a log must not get one line per item"
+    assert "10/10" in text

@@ -10,6 +10,7 @@ from typing import List, Optional
 
 from . import __version__
 from .cuda import ensure_library_path
+from .progress import Progress, Spinner
 
 
 class C:
@@ -198,18 +199,26 @@ def cmd_run(args) -> int:
         log(f"  priming Whisper with {len(names)} names: "
             f"{C.DIM}{prompt[:70]}…{C.RESET}")
     cache_dir = args.cache_dir or default_cache_dir()
+    # The model is loaded on first use, so its message must not land on top of
+    # the progress line; let the transcriber log through the bar instead.
+    bar = Progress(len(files), "transcribing", tag=f"{C.TAG}[jisho-subs]{C.RESET} ")
     tr = Transcriber(model_name=args.model, device=args.device,
                      batch_size=args.batch_size, beam_size=args.beam_size,
-                     cache_dir=cache_dir, initial_prompt=prompt, log=lambda m: log(m))
+                     cache_dir=cache_dir, initial_prompt=prompt,
+                     log=lambda m: bar.note(m.strip()))
     transcripts = []
-    t0 = time.time()
-    for i, f in enumerate(files, 1):
+    for f in files:
+        bar.note(f.name)
         transcripts.append(tr.transcribe(f, lang, force=args.force))
-        if i % 10 == 0 or i == len(files):
-            log(f"  {i}/{len(files)} files  ({time.time() - t0:.0f}s elapsed)")
+        # Cached files did no work; counting them would report a throughput
+        # that has nothing to do with the machine.
+        bar.advance(f.name, weight=0.0 if tr.last_cached else f.duration)
+    bar.close(f"{tr.cache_hits} from cache" if tr.cache_hits else "")
 
     step("3/5  aligning")
-    cues, stats = align(sentences, transcripts, lang, log=lambda m: log(m))
+    with Spinner("aligning the book against the audio",
+                 tag=f"{C.TAG}[jisho-subs]{C.RESET} "):
+        cues, stats = align(sentences, transcripts, lang, log=lambda m: log(m))
     if not stats.placed:
         die("nothing matched — is the language right, or the audio a different book?")
     log(f"  placed {stats.placed}/{len(sentences)} sentences, "
@@ -219,9 +228,18 @@ def cmd_run(args) -> int:
     if args.refine:
         step("4/5  snapping cue ends into the narrator's pauses")
         from .refine import refine
+        used = len({c.file_index for c in cues if c is not None})
+        vbar = Progress(used, "snapping", tag=f"{C.TAG}[jisho-subs]{C.RESET} ")
+
+        def on_file(phase, audio):
+            if phase == "start":
+                vbar.note(audio.name)
+            else:
+                vbar.advance(audio.name, weight=audio.duration)
+
         moved = refine(cues, files, cache_dir=cache_dir, force=args.force,
-                       log=lambda m: log(m))
-        log(f"  adjusted {sum(moved.values())} cue ends across {len(moved)} files")
+                       log=lambda m: vbar.note(m.strip()), on_file=on_file)
+        vbar.close(f"{sum(moved.values())} cue ends adjusted")
     else:
         step("4/5  skipping pause snapping (--no-refine)")
 
@@ -231,8 +249,12 @@ def cmd_run(args) -> int:
         log(f"  {C.WARN}dry run — nothing written{C.RESET}")
         write_stats = WriteStats()
     else:
-        write_stats = write_for_files(cues, files, args.out,
-                                      log=lambda m: log(m) if args.verbose else None)
+        wbar = Progress(len(files), "writing", tag=f"{C.TAG}[jisho-subs]{C.RESET} ")
+        write_stats = write_for_files(
+            cues, files, args.out,
+            log=lambda m: (log(m) if args.verbose else wbar.note(m.strip())),
+            on_file=lambda name: wbar.advance(name))
+        wbar.close()
         log(f"  {C.OK}{write_stats.files} SRT files, "
             f"{write_stats.cues} cues{C.RESET}")
 
