@@ -40,6 +40,9 @@ text is the **book's own**, not the transcriber's.
   match for every spoken chapter title.
 - **Japanese ruby**, vertical writing, `.m4b`/`.m4a`/`.ogg`, files whose
   extension lies about their container, and 1883 German orthography.
+- **Damaged files.** Audio is decoded through ffmpeg and the result checked
+  against the container's own duration, because a decoder that quietly returns
+  five per cent of a file still produces a full set of confident-looking SRTs.
 
 ## Install
 

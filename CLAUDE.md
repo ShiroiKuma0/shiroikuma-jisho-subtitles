@@ -32,6 +32,15 @@ before changing the writer, and run `jisho-subs lint` after.
 and 94 % on «Also sprach Zarathustra», whose EPUB mixes 1883 word forms with
 modernised ß while Whisper writes modern German.
 
+**`decode()` in `audio.py`, and every caller using it.** Never hand a path
+straight to faster-whisper: it decodes with PyAV, and PyAV abandons files with
+malformed embedded artwork without raising. «Nocni wędrowcy» carries a JPEG
+cover labelled as PNG, and PyAV returned 106.97 s of a 2071.75 s file — the run
+finished in 53 s for ten and three quarter hours and wrote 22 complete-looking
+SRTs covering a twentieth of the book. `check_decode()` exists so the next such
+file is a warning on the first file rather than a discovery after a full run;
+do not remove it because it "never fires".
+
 **`_snap_start`** in `refine.py`. Whisper emits words that are not there,
 typically a few milliseconds *before* a pause rather than inside it, which is
 why the test covers a fragment-then-pause case and not just "start is in
