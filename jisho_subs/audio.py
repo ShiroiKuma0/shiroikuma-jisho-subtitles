@@ -77,28 +77,64 @@ def probe(path: str) -> Optional[AudioFile]:
                      fmt.get("format_name", "?"))
 
 
-def discover(directory: str) -> List[AudioFile]:
-    """Find every audio file under *directory* in natural order.
-
-    Accepts either the directory holding the audio, or a book directory with the
-    audio in a single subdirectory.
-    """
-    candidates: List[str] = []
+def _audio_in(directory: str) -> List[str]:
+    out = []
     for entry in sorted(os.listdir(directory), key=natural_key):
         full = os.path.join(directory, entry)
         if os.path.isfile(full) and os.path.splitext(entry)[1].lower() in AUDIO_EXTS:
-            candidates.append(full)
+            out.append(full)
+    return out
 
-    if not candidates:
-        subdirs = [os.path.join(directory, d) for d in sorted(os.listdir(directory))
-                   if os.path.isdir(os.path.join(directory, d))]
-        for sub in subdirs:
-            found = discover(sub)
+
+def _seekable_share(paths: List[str]) -> float:
+    """Fraction of files in a container that can be seeked accurately.
+
+    MP3 cannot: the Android player estimates the target from average bitrate
+    and lands seconds away, which makes auto-pause fire at the wrong sentence.
+    So when a book directory offers both an MP3 set and a converted M4B set,
+    the M4B set is the one to work on.
+    """
+    from .convert import SEEK_ACCURATE
+    if not paths:
+        return 0.0
+    good = sum(1 for p in paths
+               if os.path.splitext(p)[1].lower() in SEEK_ACCURATE)
+    return good / len(paths)
+
+
+def discover(directory: str, on_choice=None) -> List[AudioFile]:
+    """Find a book's audio, in natural order.
+
+    Accepts either the directory holding the audio, or a book directory with
+    the audio in a subdirectory.  When several subdirectories hold audio — which
+    is what converting to M4B produces — exactly one is chosen rather than the
+    two being concatenated, preferring the set the app can seek accurately.
+    """
+    paths = _audio_in(directory)
+
+    if not paths:
+        groups = []
+        for name in sorted(os.listdir(directory), key=natural_key):
+            sub = os.path.join(directory, name)
+            if not os.path.isdir(sub):
+                continue
+            found = _audio_in(sub)
+            if not found:
+                nested = discover(sub)
+                found = [f.path for f in nested]
             if found:
-                candidates.extend(f.path for f in found)
+                groups.append((sub, found))
+        if not groups:
+            return []
+        if len(groups) > 1:
+            groups.sort(key=lambda g: (_seekable_share(g[1]), len(g[1])),
+                        reverse=True)
+            if on_choice:
+                on_choice(groups[0][0], [g[0] for g in groups[1:]])
+        paths = groups[0][1]
 
     files = []
-    for path in candidates:
+    for path in paths:
         info = probe(path)
         if info is not None:
             files.append(info)

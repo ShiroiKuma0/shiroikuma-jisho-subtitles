@@ -393,3 +393,78 @@ def test_implausibly_short_interpolations_are_reported():
     fine = align_mod.Cue(Sentence("Kurz.", "c", False, 2), 0, 9.0, 10.0, 0.0, True)
     out = implausible([real, squeezed, fine], "de")
     assert len(out) == 1 and out[0][0] is squeezed
+
+
+# -- MP3 to M4B conversion -----------------------------------------------
+
+def _make_mp3(path, seconds=2):
+    import subprocess
+    subprocess.run(
+        ["ffmpeg", "-nostdin", "-v", "error", "-y", "-f", "lavfi",
+         "-i", f"sine=frequency=440:duration={seconds}",
+         "-c:a", "libmp3lame", "-b:a", "64k", str(path)], check=True)
+    return str(path)
+
+
+def test_only_mp3_is_flagged_for_conversion(tmp_path):
+    from jisho_subs.convert import needs_conversion
+
+    class F:
+        def __init__(self, p): self.path = p
+    files = [F("/x/a.mp3"), F("/x/b.m4b"), F("/x/c.m4a"), F("/x/d.MP3"),
+             F("/x/e.flac")]
+    assert [f.path for f in needs_conversion(files)] == ["/x/a.mp3", "/x/d.MP3"]
+
+
+def test_conversion_produces_a_seekable_m4b_and_keeps_the_original(tmp_path):
+    from jisho_subs.audio import probe
+    from jisho_subs.convert import convert, have_ffmpeg
+    if not have_ffmpeg():
+        pytest.skip("ffmpeg not available")
+
+    src = _make_mp3(tmp_path / "001 Track.mp3", seconds=2)
+    out = str(tmp_path / "out")
+    result = convert([probe(src)], out)
+    assert result.failed == []
+    made = os.path.join(out, "001 Track.m4b")
+    assert os.path.exists(made)
+    assert os.path.exists(src), "the original must never be touched"
+
+    info = probe(made)
+    assert info.codec == "aac"
+    assert "mp4" in info.container
+    # The basename must survive, or the app stops pairing SRT with audio.
+    assert os.path.splitext(os.path.basename(made))[0] == "001 Track"
+
+
+def test_conversion_is_skipped_when_the_target_exists(tmp_path):
+    from jisho_subs.audio import probe
+    from jisho_subs.convert import convert, have_ffmpeg
+    if not have_ffmpeg():
+        pytest.skip("ffmpeg not available")
+    src = _make_mp3(tmp_path / "a.mp3", seconds=1)
+    out = str(tmp_path / "out")
+    convert([probe(src)], out)
+    again = convert([probe(src)], out)
+    assert again.made == [] and len(again.skipped) == 1
+
+
+def test_discover_prefers_the_seekable_directory(tmp_path):
+    """Once converted, a book holds both an MP3 set and an M4B set."""
+    from jisho_subs.audio import discover
+    from jisho_subs.convert import convert, have_ffmpeg
+    if not have_ffmpeg():
+        pytest.skip("ffmpeg not available")
+
+    book = tmp_path / "book"
+    mp3dir = book / "audio"
+    mp3dir.mkdir(parents=True)
+    from jisho_subs.audio import probe
+    srcs = [probe(_make_mp3(mp3dir / f"{i:02d} t.mp3", seconds=1)) for i in (1, 2)]
+    convert(srcs, str(book / "audio [m4b]"))
+
+    found = discover(str(book))
+    assert found, "should have found something"
+    assert all(f.path.endswith(".m4b") for f in found), \
+        "the MP3 set must not be chosen once an M4B set exists"
+    assert len(found) == 2, "the two sets must not be concatenated"

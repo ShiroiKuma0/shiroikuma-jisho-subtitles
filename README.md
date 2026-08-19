@@ -40,6 +40,10 @@ text is the **book's own**, not the transcriber's.
   match for every spoken chapter title.
 - **Japanese ruby**, vertical writing, `.m4b`/`.m4a`/`.ogg`, files whose
   extension lies about their container, and 1883 German orthography.
+- **MP3 audio.** The app cannot seek MP3 — its own warning says auto-pause
+  "will fire at the wrong sentence boundaries", which defeats the whole point of
+  aligning them precisely. MP3 books are converted to M4B first, into a sibling
+  `… [m4b]` directory; the originals are never touched. `--keep-mp3` opts out.
 - **Damaged files.** Audio is decoded through ffmpeg and the result checked
   against the container's own duration, because a decoder that quietly returns
   five per cent of a file still produces a full set of confident-looking SRTs.
@@ -65,6 +69,7 @@ jisho-subs -d BOOKDIR --report r.txt   # keep the run report
 jisho-subs -d BOOKDIR --no-refine      # skip pause snapping
 jisho-subs -d BOOKDIR --dry-run        # align, report, write nothing
 
+jisho-subs convert   -d BOOKDIR        # only convert MP3 → M4B, then stop
 jisho-subs sentences -d BOOKDIR        # the reference text, as it will be cued
 jisho-subs probe     -d BOOKDIR        # what would be used
 jisho-subs lint      AUDIODIR          # check SRTs against the app's parser

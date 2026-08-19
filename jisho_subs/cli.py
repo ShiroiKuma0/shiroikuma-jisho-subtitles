@@ -35,6 +35,18 @@ def log(msg: str = "") -> None:
     print(f"{C.TAG}[jisho-subs]{C.RESET} {msg}", file=sys.stderr)
 
 
+class Steps:
+    """Numbered stage headings; the count depends on whether we convert."""
+
+    def __init__(self, total: int):
+        self.total, self.n = total, 0
+
+    def __call__(self, msg: str) -> None:
+        self.n += 1
+        print(f"\n{C.TAG}[jisho-subs]{C.RESET} "
+              f"{C.HEAD}{self.n}/{self.total}  {msg}{C.RESET}", file=sys.stderr)
+
+
 def step(msg: str) -> None:
     print(f"\n{C.TAG}[jisho-subs]{C.RESET} {C.HEAD}{msg}{C.RESET}", file=sys.stderr)
 
@@ -71,6 +83,14 @@ def _resolve_inputs(args):
     if not files:
         die(f"no audio files under {audio_root}")
     return source, files
+
+
+def _rediscover(directory: str):
+    from .audio import discover
+    files = discover(directory)
+    if not files:
+        die(f"conversion produced nothing in {directory}")
+    return files
 
 
 def _resolve_language(args, source: str) -> str:
@@ -139,6 +159,30 @@ def cmd_sentences(args) -> int:
     return 0
 
 
+def cmd_convert(args) -> int:
+    from .convert import convert, have_ffmpeg, needs_conversion, target_dir
+
+    _source, files = _resolve_inputs(args)
+    stale = needs_conversion(files)
+    if not stale:
+        log(f"{C.OK}nothing to convert{C.RESET} — all "
+            f"{len(files)} files are already seek-accurate")
+        return 0
+    if not have_ffmpeg():
+        die("ffmpeg not found on PATH")
+    out_dir = args.convert_to or target_dir(stale)
+    log(f"converting {len(stale)} files → {out_dir}")
+    bar = Progress(len(stale), "converting", tag=f"{C.TAG}[jisho-subs]{C.RESET} ")
+    result = convert(stale, out_dir, jobs=args.jobs, force=args.force,
+                     on_start=lambda f: bar.note(f.name),
+                     on_done=lambda f: bar.advance(f.name, weight=f.duration))
+    bar.close(f"{len(result.made)} converted"
+              + (f", {len(result.skipped)} already present" if result.skipped else ""))
+    for name, err in result.failed:
+        log(f"  {C.ERR}failed{C.RESET} {name}: {err}")
+    return 1 if result.failed else 0
+
+
 def cmd_lint(args) -> int:
     from .srt import lint
     targets: List[str] = []
@@ -177,12 +221,40 @@ def cmd_run(args) -> int:
     from .srt import write_for_files
     from . import report as report_mod
 
+    from .convert import convert, have_ffmpeg, needs_conversion, target_dir
+
     started = time.time()
     source, files = _resolve_inputs(args)
     lang = _resolve_language(args, source)
     book = os.path.splitext(os.path.basename(source))[0]
 
-    step(f"1/5  reading {os.path.basename(source)}")
+    stale = needs_conversion(files) if args.convert else []
+    step = Steps(6 if stale else 5)
+
+    if stale:
+        # The app cannot seek MP3: its own warning says auto-pause "will fire at
+        # the wrong sentence boundaries", which defeats the entire workflow.
+        step(f"converting {len(stale)} MP3 files to M4B")
+        if not have_ffmpeg():
+            die("ffmpeg is needed to convert MP3 to M4B; pass --keep-mp3 to skip")
+        out_dir = args.convert_to or target_dir(stale)
+        log(f"  the app cannot seek MP3 accurately, so auto-pause would fire at")
+        log(f"  the wrong sentence boundaries. Originals are kept untouched.")
+        log(f"  → {out_dir}")
+        cbar = Progress(len(stale), "converting", tag=f"{C.TAG}[jisho-subs]{C.RESET} ")
+        result = convert(stale, out_dir, jobs=args.jobs, force=args.force,
+                         on_start=lambda f: cbar.note(f.name),
+                         on_done=lambda f: cbar.advance(f.name, weight=f.duration))
+        cbar.close(f"{len(result.made)} converted"
+                   + (f", {len(result.skipped)} already present" if result.skipped else ""))
+        for name, err in result.failed[:5]:
+            log(f"  {C.ERR}failed{C.RESET} {name}: {err}")
+        if result.failed:
+            die(f"{len(result.failed)} file(s) failed to convert")
+        files = _rediscover(result.out_dir)
+        log(f"  now working on {len(files)} M4B files")
+
+    step(f"reading {os.path.basename(source)}")
     dropped_docs: List[tuple] = []
     blocks = load_source(source, lambda d, n, r: dropped_docs.append((d, n, r)))
     for d, n, r in dropped_docs:
@@ -191,7 +263,7 @@ def cmd_run(args) -> int:
     sentences = segment(blocks, lang)
     log(f"  {len(blocks)} blocks -> {len(sentences)} sentences")
 
-    step(f"2/5  transcribing {len(files)} audio files "
+    step(f"transcribing {len(files)} audio files "
          f"({format_hms(sum(f.duration for f in files))})")
     names = proper_nouns(blocks, lang)
     prompt = ", ".join(names) if names else None
@@ -215,7 +287,7 @@ def cmd_run(args) -> int:
         bar.advance(f.name, weight=0.0 if tr.last_cached else f.duration)
     bar.close(f"{tr.cache_hits} from cache" if tr.cache_hits else "")
 
-    step("3/5  aligning")
+    step("aligning")
     with Spinner("aligning the book against the audio",
                  tag=f"{C.TAG}[jisho-subs]{C.RESET} "):
         cues, stats = align(sentences, transcripts, lang, log=lambda m: log(m))
@@ -226,7 +298,7 @@ def cmd_run(args) -> int:
         f"{100.0 * stats.matched_hyp / max(1, stats.hyp_tokens):.1f}% of audio claimed")
 
     if args.refine:
-        step("4/5  snapping cue ends into the narrator's pauses")
+        step("snapping cue ends into the narrator's pauses")
         from .refine import refine
         used = len({c.file_index for c in cues if c is not None})
         vbar = Progress(used, "snapping", tag=f"{C.TAG}[jisho-subs]{C.RESET} ")
@@ -241,9 +313,9 @@ def cmd_run(args) -> int:
                        log=lambda m: vbar.note(m.strip()), on_file=on_file)
         vbar.close(f"{sum(moved.values())} cue ends adjusted")
     else:
-        step("4/5  skipping pause snapping (--no-refine)")
+        step("skipping pause snapping (--no-refine)")
 
-    step("5/5  writing subtitles")
+    step("writing subtitles")
     if args.dry_run:
         from .srt import WriteStats
         log(f"  {C.WARN}dry run — nothing written{C.RESET}")
@@ -312,13 +384,19 @@ examples:
     run.add_argument("--cache-dir")
     run.add_argument("--no-refine", dest="refine", action="store_false",
                      help="skip snapping cue ends into pauses")
+    run.add_argument("--keep-mp3", dest="convert", action="store_false",
+                     help="do not convert MP3 to M4B first (the app cannot seek "
+                          "MP3, so auto-pause will land on the wrong sentence)")
+    run.add_argument("--convert-to", help="where converted audio should go "
+                                          "(default: a sibling '… [m4b]' directory)")
+    run.add_argument("--jobs", type=int, help="parallel conversions")
     run.add_argument("--force", action="store_true",
                      help="ignore cached transcripts and re-run ASR")
     run.add_argument("--dry-run", action="store_true", help="do not write SRTs")
     run.add_argument("--report", help="write the run report to this file")
     run.add_argument("--json", help="write a machine-readable report here")
     run.add_argument("-v", "--verbose", action="store_true")
-    run.set_defaults(func=cmd_run, refine=True)
+    run.set_defaults(func=cmd_run, refine=True, convert=True)
 
     sen = sub.add_parser("sentences", parents=[common],
                          help="print the reference text as it will be cued")
@@ -327,6 +405,13 @@ examples:
     pr = sub.add_parser("probe", parents=[common],
                         help="show what would be used, without doing work")
     pr.set_defaults(func=cmd_probe)
+
+    cv = sub.add_parser("convert", parents=[common],
+                        help="convert MP3 audio to M4B and stop")
+    cv.add_argument("--convert-to")
+    cv.add_argument("--jobs", type=int)
+    cv.add_argument("--force", action="store_true")
+    cv.set_defaults(func=cmd_convert)
 
     ln = sub.add_parser("lint", help="check SRTs against the app's parser contract")
     ln.add_argument("paths", nargs="+")
@@ -342,7 +427,7 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     parser = build_parser()
     # Bare `jisho-subs -d DIR` means `run`.
-    known = {"run", "sentences", "probe", "lint"}
+    known = {"run", "sentences", "probe", "lint", "convert"}
     if argv and argv[0] not in known and not argv[0] in ("-h", "--help", "--version"):
         argv.insert(0, "run")
     if not argv:

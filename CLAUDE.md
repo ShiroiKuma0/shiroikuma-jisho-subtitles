@@ -53,6 +53,18 @@ typically a few milliseconds *before* a pause rather than inside it, which is
 why the test covers a fragment-then-pause case and not just "start is in
 silence".
 
+**MP3 conversion is not optional polish.** The app's own dialog
+(`_showMp3SeekWarningDialog`) states that with MP3 "auto-pause will fire at the
+wrong sentence boundaries" — so precisely-aligned cues are wasted on MP3. The
+ffmpeg invocation in `convert.py` is copied from that dialog verbatim; keep the
+two in step if the app changes it. Conversion writes to a sibling `… [m4b]`
+directory and never touches the originals, which is also why `discover()` picks
+one directory rather than concatenating: a converted book has both sets.
+
+Do not reuse MP3-derived SRTs against the M4B — AAC encoder delay shifts the
+duration (238.315 s → 238.277 s on the first Lázár track), so the timings are
+regenerated from the M4B itself.
+
 ## Architecture note
 
 There is no chapter matching, and adding it would be a regression. Global
