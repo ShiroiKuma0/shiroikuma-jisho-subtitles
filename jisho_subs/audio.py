@@ -115,3 +115,48 @@ def format_hms(seconds: float) -> str:
     h, rem = divmod(int(seconds), 3600)
     m, s = divmod(rem, 60)
     return f"{h:d}:{m:02d}:{s:02d}"
+
+
+def decode(path: str, sampling_rate: int = 16000):
+    """Decode to mono float32 through ffmpeg rather than PyAV.
+
+    faster-whisper decodes with PyAV by default, and PyAV gives up early on
+    files carrying malformed embedded artwork.  One validation book ships a
+    JPEG cover labelled as PNG; PyAV returned **106.97 s of a 2071.75 s file**
+    — five per cent of the audio — and raised nothing.  The pipeline then
+    produced a full set of confident-looking SRTs covering a twentieth of the
+    book.  Silent loss that still yields plausible output is the worst failure
+    mode there is, so decoding goes through ffmpeg, which reads these files
+    correctly.  ``-vn -sn -dn`` drops the offending art outright.
+    """
+    import numpy as np
+
+    proc = subprocess.run(
+        ["ffmpeg", "-nostdin", "-threads", "0", "-i", path,
+         "-vn", "-sn", "-dn",
+         "-f", "f32le", "-acodec", "pcm_f32le",
+         "-ac", "1", "-ar", str(sampling_rate), "-"],
+        capture_output=True, check=True)
+    return np.frombuffer(proc.stdout, dtype=np.float32).copy()
+
+
+def decoded_seconds(samples, sampling_rate: int = 16000) -> float:
+    return len(samples) / float(sampling_rate)
+
+
+def check_decode(path: str, samples, expected: float, sampling_rate: int = 16000,
+                 tolerance: float = 0.02, log=None) -> bool:
+    """Warn when a decode came up short of the container's own duration.
+
+    This is the guard that turns the failure above into something visible on
+    the first file instead of something discovered after a full run.
+    """
+    got = decoded_seconds(samples, sampling_rate)
+    if expected <= 0:
+        return True
+    if got < expected * (1.0 - tolerance):
+        if log:
+            log(f"  decoded only {got:.0f}s of {expected:.0f}s from "
+                f"{os.path.basename(path)} — the file may be damaged")
+        return False
+    return True

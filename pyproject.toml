@@ -16,6 +16,7 @@ dependencies = [
     "pysbd>=0.3.4",
     "RapidFuzz>=3.9",
     "faster-whisper>=1.1",
+    "numpy>=1.24",
     "num2words>=0.5.13",
 ]
 

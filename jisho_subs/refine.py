@@ -54,10 +54,11 @@ def speech_intervals(path: str, cache_dir: Optional[str] = None,
         except (OSError, json.JSONDecodeError):
             pass
 
-    from faster_whisper.audio import decode_audio
     from faster_whisper.vad import get_speech_timestamps, VadOptions
 
-    audio = decode_audio(path, sampling_rate=16000)
+    from .audio import decode
+
+    audio = decode(path, sampling_rate=16000)
     opts = VadOptions(min_silence_duration_ms=250, speech_pad_ms=0)
     raw = get_speech_timestamps(audio, opts)
     out = [(seg["start"] / 16000.0, seg["end"] / 16000.0) for seg in raw]

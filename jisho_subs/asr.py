@@ -19,9 +19,9 @@ import os
 from dataclasses import dataclass, asdict
 from typing import List, Optional
 
-from .audio import AudioFile
+from .audio import AudioFile, check_decode, decode
 
-CACHE_VERSION = 1
+CACHE_VERSION = 2   # ffmpeg decoding; PyAV truncated damaged files
 
 
 @dataclass
@@ -150,8 +150,12 @@ class Transcriber:
                 return cached
 
         self._ensure_model()
+        # Decode ourselves rather than letting faster-whisper reach for PyAV,
+        # which silently truncates files with malformed cover art.
+        samples = decode(audio.path)
+        check_decode(audio.path, samples, audio.duration, log=self.log)
         segments, _info = self._pipeline.transcribe(
-            audio.path,
+            samples,
             batch_size=self.batch_size,
             language=language,
             beam_size=self.beam_size,

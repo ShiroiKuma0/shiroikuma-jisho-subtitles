@@ -275,3 +275,50 @@ def test_the_linter_catches_a_file_the_app_would_mangle(tmp_path):
 def test_natural_sort_matches_the_app():
     names = ["10 Foo.mp3", "2 Foo.mp3", "1 Foo.mp3"]
     assert sorted(names, key=natural_key) == ["1 Foo.mp3", "2 Foo.mp3", "10 Foo.mp3"]
+
+
+# -- decoding ------------------------------------------------------------
+
+def test_decode_reads_the_whole_file_when_the_cover_art_is_broken(tmp_path):
+    """PyAV returned 106.97 s of this 2071.75 s file and raised nothing.
+
+    Skipped unless the validation corpus is present; the point is the real
+    file, since the bug only appears on genuinely malformed artwork.
+    """
+    import os
+    from jisho_subs.audio import decode, decoded_seconds, probe
+
+    book = os.path.expanduser("~/tmp/subtitles/2")
+    if not os.path.isdir(book):
+        pytest.skip("validation corpus not present")
+    subdir = next(os.path.join(book, d) for d in os.listdir(book)
+                  if os.path.isdir(os.path.join(book, d)))
+    mp3 = os.path.join(subdir, "01-nocni-wedrowcy.mp3")
+    if not os.path.exists(mp3):
+        pytest.skip("sample file not present")
+
+    info = probe(mp3)
+    got = decoded_seconds(decode(mp3))
+    assert got == pytest.approx(info.duration, rel=0.02), (
+        f"decoded {got:.1f}s of {info.duration:.1f}s")
+
+
+def test_short_decode_is_reported(tmp_path):
+    import numpy as np
+    from jisho_subs.audio import check_decode
+
+    messages = []
+    ok = check_decode("x.mp3", np.zeros(16000 * 107, dtype=np.float32),
+                      expected=2071.0, log=messages.append)
+    assert ok is False
+    assert messages and "107s of 2071s" in messages[0]
+
+
+def test_full_decode_is_not_reported():
+    import numpy as np
+    from jisho_subs.audio import check_decode
+
+    messages = []
+    assert check_decode("x.mp3", np.zeros(16000 * 100, dtype=np.float32),
+                        expected=100.0, log=messages.append) is True
+    assert messages == []
