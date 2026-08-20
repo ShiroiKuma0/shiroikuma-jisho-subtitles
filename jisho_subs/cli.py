@@ -357,6 +357,25 @@ def cmd_convert(args) -> int:
     files = _resolve_audio_only(args)
     stale = _conversion_candidates(args, files)
     if not stale:
+        if args.force:
+            # Nothing needs converting, but --force still means redo the work:
+            # rewrite the tags in place.  This is the only way to correct a
+            # book whose MP3s have already been deleted.
+            log(f"all {len(files)} files are already seek-accurate; "
+                f"{C.HEAD}--force re-tags them in place{C.RESET}")
+            from .convert import retag
+            bar = Progress(len(files), "re-tagging",
+                           tag=f"{C.TAG}[jisho-subs]{C.RESET} ")
+            result = retag(files, positions=_book_numbering(files, []),
+                           jobs=args.jobs,
+                           on_start=lambda f: bar.note(f.name),
+                           on_done=lambda f: bar.advance(f.name))
+            bar.close(f"{len(result.made)} re-tagged")
+            for name, err in result.failed[:5]:
+                log(f"  {C.ERR}failed{C.RESET} {name}: {err}")
+            _report_tags(result)
+            _check_track_numbering(_resolve_audio_only(args))
+            return 1 if result.failed else 0
         log(f"{C.OK}nothing to convert{C.RESET} — all "
             f"{len(files)} files are already seek-accurate")
         if args.delete_mp3:

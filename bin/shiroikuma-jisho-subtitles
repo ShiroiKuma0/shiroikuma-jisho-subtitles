@@ -153,6 +153,10 @@ ${C}TAGS ON THE CONVERTED AUDIO${R}
     does not, so ${D}Knife, Meditations after an attempted murder, Salman
     Rushdie${R} still credits Rushdie.
 
+    Tags cannot be revised retroactively, so a book converted across several
+    runs carries a different track total from each of them.  Every run checks
+    this and says so; ${C}convert --force${R} rewrites them all to agree.
+
     ${B}Per track${R}, a title is taken from the file's own tag when it says
     something, from the filename when the tag does not, and left unset rather
     than filled with a restatement.
@@ -250,7 +254,11 @@ ${C}OPTIONS${R}
     ${C}--convert-to${R} DIR      where the M4Bs go
     ${C}--jobs${R} N              parallel conversions
     ${C}--reencode${R}            re-encode to AAC rather than copy losslessly
-    ${C}--force${R}               re-convert even where an M4B already exists
+    ${C}--force${R}               re-convert even where an M4B already exists.  When
+                          nothing needs converting it ${B}re-tags in place${R} instead,
+                          rewriting the tags without touching the audio — the
+                          only way to correct a book whose source MP3s have
+                          already been deleted
 
   ${B}sentences${R} — print the reference text as it will be cued
   ${B}probe${R} — say what would be used, and do nothing

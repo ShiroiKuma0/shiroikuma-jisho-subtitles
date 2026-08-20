@@ -281,3 +281,58 @@ def delete_sources(files: Sequence[AudioFile], out_dir: str,
         except OSError as exc:
             kept.append((f.name, str(exc)))
     return deleted, kept
+
+
+def retag(files: Sequence[AudioFile], out_dir: Optional[str] = None,
+          positions: Optional[dict] = None, jobs: Optional[int] = None,
+          on_start=None, on_done=None) -> ConvertResult:
+    """Rewrite the tags on already-converted audio, without re-encoding it.
+
+    Needed because tags cannot be revised retroactively and the source MP3s may
+    be long gone: a book converted across several runs carries a different track
+    total from each of them, and once `-d` has removed the MP3s there is nothing
+    left to convert from.  This remuxes each file with `-c copy`, so the audio
+    is untouched and the work takes no measurable time.
+    """
+    if not files:
+        return ConvertResult([], [], [], out_dir or "", None, [], [], {}, 0)
+    out_dir = out_dir or os.path.dirname(os.path.abspath(files[0].path))
+    info = parse_directory(out_dir)
+
+    made: List[str] = []
+    failed: List[tuple] = []
+    discarded: List[tuple] = []
+    titled: List[tuple] = []
+
+    def work(item):
+        index, f = item
+        if on_start:
+            on_start(f)
+        track, total = (positions or {}).get(f.path, (index, len(files)))
+        tags, dropped = build_tags(info, read_tags(f.path), f.name, track, total)
+        if dropped:
+            discarded.append((f.name, dropped))
+        elif tags.get("title"):
+            titled.append((f.name, tags["title"]))
+        tmp = f.path + ".retag.m4b"
+        cmd = (["ffmpeg", "-nostdin", "-v", "error", "-y", "-i", f.path,
+                "-map", "0", "-c", "copy", "-disposition:v", "attached_pic",
+                "-f", "mp4"] + _metadata_args(tags) + [tmp])
+        proc = subprocess.run(cmd, capture_output=True, text=True)
+        if proc.returncode == 0 and os.path.exists(tmp) and os.path.getsize(tmp) > 0:
+            os.replace(tmp, f.path)
+            made.append(f.path)
+        else:
+            failed.append((f.name, (proc.stderr or "").strip()[:200]))
+            if os.path.exists(tmp):
+                os.unlink(tmp)
+        if on_done:
+            on_done(f)
+
+    jobs = jobs or min(16, max(1, (os.cpu_count() or 4)))
+    with ThreadPoolExecutor(max_workers=jobs) as pool:
+        list(pool.map(work, enumerate(files, 1)))
+
+    total = max((t for _, t in (positions or {}).values()), default=len(files))
+    return ConvertResult(made, [], failed, out_dir, info, discarded,
+                         titled, {"re-tagged in place": len(made)}, total)

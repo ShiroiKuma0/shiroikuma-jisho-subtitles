@@ -872,3 +872,36 @@ def test_numbering_survives_a_split_conversion(tmp_path):
     totals = {read_tags(str(tmp_path / f"{i:02d} t.m4b"))["track"].split("/")[1]
               for i in range(1, 5)}
     assert totals == {"4"}, f"totals disagree across the book: {totals}"
+
+
+def test_retagging_rewrites_tags_without_touching_the_audio(tmp_path):
+    """The only way to fix a book whose source MP3s have been deleted."""
+    import subprocess
+    from jisho_subs.audio import probe, read_tags
+    from jisho_subs.convert import convert, have_ffmpeg, numbering, retag, target_dir
+    if not have_ffmpeg():
+        pytest.skip("ffmpeg not available")
+
+    srcs = [probe(_make_mp3(tmp_path / f"{i:02d} t.mp3", seconds=2))
+            for i in range(1, 4)]
+    convert(srcs[:1], target_dir(srcs))          # an earlier run: one file, 1/1
+    made = str(tmp_path / "01 t.m4b")
+    assert read_tags(made)["track"] == "1/1"
+
+    def audio_md5(path):
+        return subprocess.run(
+            ["ffmpeg", "-nostdin", "-v", "error", "-i", path, "-map", "0:a",
+             "-f", "md5", "-"], capture_output=True, text=True).stdout.strip()
+
+    before = audio_md5(made)
+    m4bs = [probe(made)]
+    retag(m4bs, positions=numbering([probe(str(tmp_path / f"{i:02d} t.mp3"))
+                                     for i in range(1, 4)]))
+    assert read_tags(made)["track"] == "1/3", "the total must count the book"
+    assert audio_md5(made) == before, "re-tagging must not alter the audio"
+
+
+def test_retagging_reports_what_it_did():
+    from jisho_subs.convert import retag
+    result = retag([])
+    assert result.made == [] and result.failed == []
