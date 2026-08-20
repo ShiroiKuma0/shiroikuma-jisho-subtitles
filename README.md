@@ -69,17 +69,18 @@ an RTX 5090, so a 7¾-hour book is two hours or five minutes.
 ## Use
 
 ```
-shiroikuma-jisho-subtitles BOOKDIR                # language read from the EPUB
-shiroikuma-jisho-subtitles BOOKDIR -l de          # or state it
-shiroikuma-jisho-subtitles BOOKDIR --report r.txt # keep the run report
-shiroikuma-jisho-subtitles BOOKDIR -d                # …and delete the MP3s
+shiroikuma-jisho-subtitles BOOKDIR                  # language read from the EPUB
+shiroikuma-jisho-subtitles BOOKDIR -l de            # or state it
+shiroikuma-jisho-subtitles BOOKDIR -d               # …and delete the MP3s after
+shiroikuma-jisho-subtitles BOOKDIR -d -y            # …without being asked
 shiroikuma-jisho-subtitles BOOKDIR --keep-mp3       # do not convert to M4B
-shiroikuma-jisho-subtitles BOOKDIR --dry-run      # align, report, write nothing
+shiroikuma-jisho-subtitles BOOKDIR --report r.txt   # keep the run report
+shiroikuma-jisho-subtitles BOOKDIR --dry-run        # align, report, write nothing
 
-shiroikuma-jisho-subtitles convert   -d BOOKDIR      # only MP3 → M4B, then stop
-shiroikuma-jisho-subtitles sentences -d BOOKDIR      # the text, as it will be cued
-shiroikuma-jisho-subtitles probe     -d BOOKDIR      # what would be used
-shiroikuma-jisho-subtitles lint      AUDIODIR        # check the app's SRT contract
+shiroikuma-jisho-subtitles convert   BOOKDIR        # only MP3 → M4B, then stop
+shiroikuma-jisho-subtitles sentences BOOKDIR        # the text, as it will be cued
+shiroikuma-jisho-subtitles probe     BOOKDIR        # what would be used
+shiroikuma-jisho-subtitles lint      AUDIODIR       # check the app's SRT contract
 ```
 
 `BOOKDIR` holds the EPUB (or PDF) and the audio, either loose or in one
