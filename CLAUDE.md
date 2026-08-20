@@ -129,6 +129,16 @@ MP4 keeps `language` on the **stream**, not the container. A format-level
 `-metadata language=…` is accepted by ffmpeg and silently dropped, leaving the
 track marked `und`.
 
+**`plan.py` classifies, it does not touch anything.** `inspect()` deliberately
+lists rather than probes — surveying the 127-book library would otherwise cost
+one ffprobe per file across 4,376 of them; as it stands the survey is instant.
+The full `discover()` runs only when a book is actually processed.
+
+**An SRT can be the reference text.** A folder of MP3s with subtitles has
+everything except a book: the cues *are* the sentences, so they go in where an
+EPUB's sentences would and the same alignment re-places them. Read every SRT
+before writing any, since they are rewritten in place.
+
 ## Architecture note
 
 There is no chapter matching, and adding it would be a regression. Global

@@ -441,66 +441,101 @@ def cmd_lint(args) -> int:
     return 0
 
 
-def cmd_run(args) -> int:
-    from .source import load_source
-    from .segment import segment
-    from .normalize import proper_nouns
-    from .asr import Transcriber, default_cache_dir
+def _reference_from_srt(plan, log_fn) -> list:
+    """Use the folder's existing cues as the reference text.
+
+    A folder of MP3s with subtitles has everything needed except a book: the
+    cues *are* the sentences. Feeding them in where an EPUB's sentences would go
+    means the same alignment re-places them against the converted audio, which
+    is a genuine resync rather than a constant offset — and it repairs an SRT
+    that was already drifting.
+    """
+    from .segment import Sentence
+    from .srt import companion, read_cues
+
+    sentences, sources = [], 0
+    for audio in plan.audio:
+        path = companion(audio)
+        if not path:
+            continue
+        cues = read_cues(path)
+        if not cues:
+            continue
+        sources += 1
+        name = os.path.basename(path)
+        for text in cues:
+            sentences.append(Sentence(text, name, False, len(sentences)))
+    log_fn(f"  {len(sentences)} cues from {sources} existing SRT file(s)")
+    return sentences
+
+
+def _language_for(args, plan, files):
+    """The book's language: stated, declared by the EPUB, or guessed."""
+    from .metadata import detect_language, parse_directory
+    from .segment import normalise_lang
+    from .source import book_metadata
+    from .audio import read_tags
+
+    if getattr(args, "lang", None):
+        return normalise_lang(args.lang)
+    if plan.source:
+        declared = (book_metadata(plan.source).get("language") or "")
+        declared = declared.split("-")[0].strip().lower()
+        if declared:
+            return normalise_lang(declared)
+    info = parse_directory(os.path.dirname(os.path.abspath(plan.audio[0])))
+    sample = files[:3]
+    guess = detect_language(info, [f.name for f in sample],
+                            [read_tags(f.path) for f in sample])
+    if guess:
+        log(f"  language not stated; {C.HEAD}{guess}{C.RESET} from the folder "
+            f"and file names")
+        return normalise_lang(guess)
+    die("could not determine the language; pass -l/--lang")
+
+
+def _run_one_book(args, plan) -> bool:
+    """The whole pipeline for one book.  Returns True if anything was done."""
     from .align import align
-    from .audio import format_hms
+    from .asr import Transcriber, default_cache_dir
+    from .audio import discover, format_hms
+    from .convert import convert, have_ffmpeg, needs_conversion, target_dir
+    from .normalize import proper_nouns
+    from .plan import FROM_EPUB, FROM_NOTHING, FROM_SRT
+    from .segment import segment
+    from .source import load_source
     from .srt import write_for_files
     from . import report as report_mod
 
-    from .convert import convert, have_ffmpeg, needs_conversion, target_dir
-
     started = time.time()
-    source, files = _resolve_inputs(args)
-    lang = _resolve_language(args, source)
-    book = os.path.splitext(os.path.basename(source))[0]
+    shadowed: List[str] = []
+    files = discover(plan.directory, on_shadow=shadowed.extend)
+    args._shadowed = shadowed
+    if not files:
+        return False
+    lang = _language_for(args, plan, files)
 
     stale = _conversion_candidates(args, files) if args.convert else []
     if stale and args.dry_run:
-        # --dry-run promises to write nothing.  Re-encoding a whole audiobook
-        # (and, with -d, deleting the originals) is emphatically writing
-        # something, so conversion is skipped and the alignment below runs
-        # against the MP3s instead.
         log(f"{C.WARN}dry run: not converting {len(stale)} MP3 file(s){C.RESET}")
-        log(f"  {C.DIM}the alignment below is against the MP3s; real timings "
-            f"will shift slightly once converted{C.RESET}")
         stale = []
-    step = Steps(6 if stale else 5)
+    subtitles = plan.reference != FROM_NOTHING
+    step = Steps((1 if stale else 0) + (5 if subtitles else 0) or 1)
 
     if stale:
-        # The app cannot seek MP3: its own warning says auto-pause "will fire at
-        # the wrong sentence boundaries", which defeats the entire workflow.
         already = len(files) - len(stale)
-        if already > 0:
-            step(f"converting the remaining {len(stale)} of "
-                 f"{already + len(stale)} tracks to M4B")
-        else:
-            step(f"converting {len(stale)} tracks to M4B")
+        step(f"converting {len(stale)} of {len(files)} tracks to M4B"
+             if already else f"converting {len(stale)} tracks to M4B")
         if not have_ffmpeg():
             die("ffmpeg is needed to convert MP3 to M4B; pass --keep-mp3 to skip")
         out_dir = args.convert_to or target_dir(stale)
-        if already > 0:
-            log(f"  {already} track(s) were converted by an earlier run and are "
-                f"left as they are")
-            log(f"  {C.DIM}(--force redoes them){C.RESET}")
-        log("  the app cannot seek MP3 accurately, so auto-pause would fire at")
-        log("  the wrong sentence boundaries. The M4B is written beside each")
-        log("  MP3 under the same name; the MP3 itself is left untouched.")
-        if not args.reencode:
-            log(f"  {C.DIM}the MP3 stream is copied in, not re-encoded — "
-                f"same audio, smaller file{C.RESET}")
-        log(f"  → {out_dir}")
         cbar = Progress(len(stale), "converting", tag=f"{C.TAG}[jisho-subs]{C.RESET} ")
         result = convert(stale, out_dir, jobs=args.jobs, force=args.force,
-                         reencode=args.reencode,
-                         positions=_book_numbering(files, stale), language=lang,
+                         reencode=args.reencode, language=lang,
+                         positions=_book_numbering(files, stale),
                          on_start=lambda f: cbar.note(f.name),
                          on_done=lambda f: cbar.advance(f.name, weight=f.duration))
-        cbar.close(f"{len(result.made)} converted"
-                   + (f", {len(result.skipped)} already present" if result.skipped else ""))
+        cbar.close(f"{len(result.made)} converted")
         for name, err in result.failed[:5]:
             log(f"  {C.ERR}failed{C.RESET} {name}: {err}")
         if result.failed:
@@ -509,44 +544,38 @@ def cmd_run(args) -> int:
         if args.delete_mp3:
             _delete_mp3s(args, stale, result.out_dir, args.yes)
         files = _rediscover(result.out_dir)
-        m4b = sum(1 for f in files if f.path.lower().endswith((".m4b", ".m4a")))
-        log("")
-        if m4b == len(files):
-            log(f"  {C.OK}✓ all {len(files)} tracks of this book are now M4B"
-                f"{C.RESET}")
-        else:
-            log(f"  {C.WARN}{m4b} of {len(files)} tracks are M4B; the rest could "
-                f"not be converted{C.RESET}")
         _check_track_numbering(files)
-        if (result.made or result.skipped) and not args.delete_mp3:
-            mp3s = os.path.join(out_dir, "*.mp3")
-            log("")
-            log(f"  {C.WARN}the MP3s are still there, and the app lists every audio")
-            log(f"  file in the folder — so its chapter list will show each track")
-            log(f"  twice until you remove them:{C.RESET}")
-            log(f"    rm {mp3s}")
-            log(f"  {C.DIM}(deliberately not done for you — deleting your audio is "
-                f"your call){C.RESET}")
 
-    step(f"reading {os.path.basename(source)}")
+    if not subtitles:
+        log(f"  {C.OK}✓ {len(files)} tracks are M4B; no book or subtitles here, "
+            f"so nothing further{C.RESET}")
+        return True
+
     dropped_docs: List[tuple] = []
-    blocks = load_source(source, lambda d, n, r: dropped_docs.append((d, n, r)))
-    for d, n, r in dropped_docs:
-        log(f"  {C.WARN}dropped{C.RESET} {d}  "
-            f"({n} blocks, {r:.0%} of it appears elsewhere — a contents page)")
-    sentences = segment(blocks, lang)
-    log(f"  {len(blocks)} blocks -> {len(sentences)} sentences")
+    if plan.reference == FROM_EPUB:
+        step(f"reading {os.path.basename(plan.source)}")
+        blocks = load_source(plan.source, lambda d, n, r: dropped_docs.append((d, n, r)))
+        for d, n, r in dropped_docs:
+            log(f"  {C.WARN}dropped{C.RESET} {d}  ({n} blocks, {r:.0%} of it "
+                f"appears elsewhere — a contents page)")
+        sentences = segment(blocks, lang)
+        log(f"  {len(blocks)} blocks -> {len(sentences)} sentences")
+        names = proper_nouns(blocks, lang)
+    else:
+        step("reading the existing subtitles as the reference text")
+        sentences = _reference_from_srt(plan, log)
+        names = []
+    if not sentences:
+        log(f"  {C.WARN}no reference text; skipping subtitles{C.RESET}")
+        return True
 
     step(f"transcribing {len(files)} audio files "
          f"({format_hms(sum(f.duration for f in files))})")
-    names = proper_nouns(blocks, lang)
     prompt = ", ".join(names) if names else None
     if prompt:
         log(f"  priming Whisper with {len(names)} names: "
             f"{C.DIM}{prompt[:70]}…{C.RESET}")
     cache_dir = args.cache_dir or default_cache_dir()
-    # The model is loaded on first use, so its message must not land on top of
-    # the progress line; let the transcriber log through the bar instead.
     bar = Progress(len(files), "transcribing", tag=f"{C.TAG}[jisho-subs]{C.RESET} ")
     tr = Transcriber(model_name=args.model, device=args.device,
                      batch_size=args.batch_size, beam_size=args.beam_size,
@@ -556,19 +585,17 @@ def cmd_run(args) -> int:
     for f in files:
         bar.note(f.name)
         transcripts.append(tr.transcribe(f, lang, force=args.force))
-        # Cached files did no work; counting them would report a throughput
-        # that has nothing to do with the machine.
         bar.advance(f.name, weight=0.0 if tr.last_cached else f.duration)
     bar.close(f"{tr.cache_hits} from cache" if tr.cache_hits else "")
 
     step("aligning")
-    with Spinner("aligning the book against the audio",
+    with Spinner("aligning the reference against the audio",
                  tag=f"{C.TAG}[jisho-subs]{C.RESET} "):
         cues, stats = align(sentences, transcripts, lang, log=lambda m: log(m))
     if not stats.placed:
-        die("nothing matched — is the language right, or the audio a different book?")
-    log(f"  placed {stats.placed}/{len(sentences)} sentences, "
-        f"{stats.anchors} anchors, "
+        log(f"  {C.ERR}nothing matched — skipping this book{C.RESET}")
+        return True
+    log(f"  placed {stats.placed}/{len(sentences)}, {stats.anchors} anchors, "
         f"{100.0 * stats.matched_hyp / max(1, stats.hyp_tokens):.1f}% of audio claimed")
 
     if args.refine:
@@ -586,8 +613,6 @@ def cmd_run(args) -> int:
         moved = refine(cues, files, cache_dir=cache_dir, force=args.force,
                        log=lambda m: vbar.note(m.strip()), on_file=on_file)
         vbar.close(f"{sum(moved.values())} cue ends adjusted")
-    else:
-        step("skipping pause snapping (--no-refine)")
 
     step("writing subtitles")
     if args.dry_run:
@@ -601,22 +626,121 @@ def cmd_run(args) -> int:
             log=lambda m: (log(m) if args.verbose else wbar.note(m.strip())),
             on_file=lambda name: wbar.advance(name))
         wbar.close()
-        log(f"  {C.OK}{write_stats.files} SRT files, "
-            f"{write_stats.cues} cues{C.RESET}")
+        log(f"  {C.OK}{write_stats.files} SRT files, {write_stats.cues} cues{C.RESET}")
 
-    text = report_mod.build(book, lang, source, files, sentences, cues, stats,
-                            write_stats, dropped_docs)
-    print(text)
+    book = plan.name if plan.reference != FROM_EPUB else \
+        os.path.splitext(os.path.basename(plan.source))[0]
+    text = report_mod.build(book, lang, plan.source or plan.directory, files,
+                            sentences, cues, stats, write_stats, dropped_docs)
     if args.report:
-        with open(args.report, "w", encoding="utf-8") as fh:
+        with open(args.report, "a" if getattr(args, "_appending", False) else "w",
+                  encoding="utf-8") as fh:
             fh.write(text + "\n")
-        log(f"report written to {args.report}")
+        args._appending = True
+    elif not getattr(args, "_quiet_report", False):
+        print(text)
     if args.json:
         report_mod.write_json(args.json, book, lang, files, cues, stats, write_stats)
-        log(f"machine-readable report written to {args.json}")
-
     log(f"{C.OK}done in {time.time() - started:.0f}s{C.RESET}")
-    return 0
+    return True
+
+
+def _show_plan(root: str, plans) -> int:
+    """Print what a library run intends to do.  Returns the number of busy books."""
+    import collections
+
+    counts = collections.Counter(p.action for p in plans)
+    tracks = sum(p.tracks for p in plans if p.busy)
+    log("")
+    log(f"  {C.HEAD}{len(plans)} directories under {os.path.basename(root)}"
+        f"{C.RESET}")
+    for action in ("convert + subtitles", "convert", "subtitles",
+                   "nothing to do", "no audio"):
+        if counts.get(action):
+            colour = C.DIM if action in ("nothing to do", "no audio") else C.OK
+            log(f"    {colour}{counts[action]:>4}  {action}{C.RESET}")
+    log("")
+    for p in plans:
+        if not p.busy:
+            continue
+        log(f"    {C.OK}{p.action:<20}{C.RESET} {p.tracks:>4} tracks  "
+            f"{C.DIM}{p.reference:<5}{C.RESET} {p.name[:56]}")
+    busy = sum(1 for p in plans if p.busy)
+    log("")
+    log(f"  {busy} book(s) to process, {tracks} tracks in total")
+    return busy
+
+
+def cmd_run(args) -> int:
+    from .plan import inspect, survey
+
+    if getattr(args, "directory_opt", None) and not args.directory:
+        args.directory = args.directory_opt
+    root = args.directory or args.audio
+    if not root or not os.path.isdir(root):
+        die("pass a book directory, a library directory, or --epub with --audio")
+    root = os.path.abspath(root)
+
+    if args.epub or args.audio:
+        # An explicit source or audio directory means one book, stated outright.
+        plan = inspect(root)
+        if args.epub:
+            from .plan import FROM_EPUB
+            plan.source, plan.reference = args.epub, FROM_EPUB
+        return 0 if _run_one_book(args, plan) else 1
+
+    kind, plans = survey(root)
+    if kind == "empty":
+        die(f"no audio found under {root}")
+    if kind == "book":
+        return 0 if _run_one_book(args, plans[0]) else 1
+
+    step_all = Steps(1)
+    step_all(f"surveying {os.path.basename(root)}")
+    busy = _show_plan(root, plans)
+    if not busy:
+        log(f"  {C.OK}nothing to do{C.RESET}")
+        return 0
+    if args.delete_mp3:
+        log("")
+        log(f"  {C.ERR}*** -d given: every MP3 in these {busy} book(s) will be")
+        log(f"      PERMANENTLY DELETED once its M4B is verified ***{C.RESET}")
+    if args.dry_run:
+        # On a library the plan *is* the rehearsal.  Running a full
+        # alignment for every book to then write nothing would take hours
+        # to say what the table above already said.
+        log(f"  {C.WARN}dry run — the plan above is what would happen; "
+            f"nothing was touched{C.RESET}")
+        return 0
+    if not args.yes:
+        print(f"{C.TAG}[jisho-subs]{C.RESET} {C.TAG}Proceed?{C.RESET} [y/N] ",
+              file=sys.stderr, end="", flush=True)
+        try:
+            answer = input().strip().lower()
+        except (EOFError, KeyboardInterrupt):
+            print(file=sys.stderr)
+            answer = ""
+        if answer not in ("y", "yes"):
+            log(f"{C.DIM}nothing done.{C.RESET}")
+            return 0
+
+    # Asked once, up front; never again per book.
+    args.yes = True
+    args._quiet_report = True
+    done = failed = 0
+    for i, plan in enumerate([p for p in plans if p.busy], 1):
+        log("")
+        log(f"{C.HEAD}━━ {i}/{busy}  {plan.name}{C.RESET}")
+        try:
+            _run_one_book(args, plan)
+            done += 1
+        except SystemExit as exc:
+            failed += 1
+            log(f"  {C.ERR}skipped: {exc}{C.RESET}")
+    log("")
+    log(f"{C.OK}library finished — {done} book(s) processed"
+        f"{f', {failed} skipped' if failed else ''}{C.RESET}")
+    return 1 if failed else 0
 
 
 # -- argument parsing ----------------------------------------------------

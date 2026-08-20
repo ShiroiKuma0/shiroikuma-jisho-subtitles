@@ -954,3 +954,83 @@ def test_a_stated_language_always_wins():
     from jisho_subs.metadata import detect_language, parse_directory
     info = parse_directory("Empuzjon, Olga Tokarczuk -- [197][942] (2022)")
     assert detect_language(info, ["第1章.mp3"], []) == "pl"
+
+
+# -- working out what a directory is -------------------------------------
+
+def _book_dir(tmp_path, name, tracks=2, srt=False, m4b=False, epub=False):
+    import subprocess
+    d = tmp_path / name
+    d.mkdir(parents=True)
+    for i in range(1, tracks + 1):
+        stem = f"{i:02d} track"
+        if m4b:
+            subprocess.run(["ffmpeg", "-nostdin", "-v", "error", "-y", "-f", "lavfi",
+                            "-i", "sine=frequency=440:duration=1", "-c:a", "aac",
+                            str(d / f"{stem}.m4b")], check=True)
+        else:
+            _make_mp3(d / f"{stem}.mp3", seconds=1)
+        if srt:
+            (d / f"{stem}.srt").write_text(
+                "1\n00:00:00,000 --> 00:00:01,000\nEin Satz.\n", encoding="utf-8")
+    if epub:
+        (d / "book.epub").write_bytes(b"not a real epub")
+    return str(d)
+
+
+def test_a_folder_of_mp3s_is_a_book_that_needs_converting(tmp_path):
+    from jisho_subs.plan import FROM_NOTHING, classify, inspect
+    d = _book_dir(tmp_path, "bare", tracks=3)
+    assert classify(d) == "book"
+    plan = inspect(d)
+    assert plan.to_convert == 3 and plan.reference == FROM_NOTHING
+    assert plan.action == "convert"
+
+
+def test_mp3s_with_subtitles_use_those_as_the_reference(tmp_path):
+    from jisho_subs.plan import FROM_SRT, inspect
+    plan = inspect(_book_dir(tmp_path, "subbed", tracks=3, srt=True))
+    assert plan.reference == FROM_SRT and plan.subtitles == 3
+    assert plan.action == "convert + subtitles"
+
+
+def test_an_already_converted_book_needs_nothing(tmp_path):
+    from jisho_subs.plan import inspect
+    plan = inspect(_book_dir(tmp_path, "done", tracks=2, srt=True, m4b=True))
+    assert plan.to_convert == 0 and plan.action == "nothing to do"
+    assert not plan.busy
+
+
+def test_a_folder_of_books_is_a_library(tmp_path):
+    from jisho_subs.plan import classify, survey
+    root = tmp_path / "library"
+    _book_dir(root, "one", tracks=1)
+    _book_dir(root, "two", tracks=1, srt=True)
+    _book_dir(root, "three", tracks=1, m4b=True)
+    assert classify(str(root)) == "library"
+    kind, plans = survey(str(root))
+    assert kind == "library" and len(plans) == 3
+    assert sorted(p.action for p in plans) == \
+        ["convert", "convert + subtitles", "nothing to do"]
+
+
+def test_an_epub_makes_it_a_book_not_a_library(tmp_path):
+    from jisho_subs.plan import classify
+    d = _book_dir(tmp_path, "withbook", tracks=1, epub=True)
+    assert classify(d) == "book"
+
+
+def test_reading_cues_back_out_of_an_srt(tmp_path):
+    from jisho_subs.srt import read_cues
+    p = tmp_path / "a.srt"
+    p.write_text("1\n00:00:01,000 --> 00:00:02,000\nErster Satz.\n\n"
+                 "2\n00:00:02,500 --> 00:00:04,000\nZweiter\nSatz.\n",
+                 encoding="utf-8")
+    assert read_cues(str(p)) == ["Erster Satz.", "Zweiter Satz."]
+
+
+def test_a_byte_order_mark_does_not_leak_into_the_first_cue(tmp_path):
+    from jisho_subs.srt import read_cues
+    p = tmp_path / "b.srt"
+    p.write_bytes("﻿1\n00:00:01,000 --> 00:00:02,000\nSatz.\n".encode("utf-8"))
+    assert read_cues(str(p)) == ["Satz."]

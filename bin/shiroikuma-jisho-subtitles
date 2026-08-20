@@ -32,6 +32,7 @@ ${C}SYNOPSIS${R}
     ${PROG} ${C}probe${R}     ${C}BOOKDIR${R}     show what would be used, do nothing
     ${PROG} ${C}lint${R}      ${C}AUDIODIR${R}    check SRTs against the app's parser
 
+    ${PROG} ${C}LIBRARYDIR${R}             walk a folder of books, one by one
     ${PROG} ${C}-s${R}                     set up, or check, this machine
     ${PROG} ${C}-s --rebuild${R}           throw the environment away and rebuild it
 
@@ -48,6 +49,27 @@ ${C}WHAT IT IS FOR${R}
     This produces those SRTs from any EPUB and any audiobook — one file or two
     hundred — unattended.  The subtitle text is the ${B}book's own${R}, never the
     transcriber's, so spelling and punctuation are the author's.
+
+${C}WHAT YOU CAN POINT IT AT${R}
+    The tool works out what a directory is and does the right thing, rather
+    than asking you to remember a mode.  Three shapes are recognised:
+
+      ${B}A book with its EPUB${R}      the full pipeline, as described below
+      ${B}A folder of MP3s and SRTs${R} converts the audio, then re-aligns those
+                              existing cues against it.  The subtitles are the
+                              reference text; no book is needed.  They are
+                              rewritten in place.
+      ${B}A folder of MP3s alone${R}    converts the audio and stops.  Nothing to
+                              make subtitles from, so none are made.
+
+    ${B}A folder of such folders${R} — your ${C}[197]${R} library — is walked as a whole.
+    It surveys every directory first, prints what it intends to do to each,
+    and asks ${B}once${R} before touching anything.  Books that need nothing are
+    named in the summary and skipped.  With ${C}-d${R} the deletion warning appears
+    in that same single prompt, not once per book.
+
+    ${C}-n${R} on a library prints the plan and stops — the plan is the rehearsal,
+    so it does not spend hours aligning books in order to write nothing.
 
 ${C}WHAT IT DOES, IN ORDER${R}
     ${B}0. Convert${R}   If the audio is MP3, it is converted to M4B ${B}first${R}, before

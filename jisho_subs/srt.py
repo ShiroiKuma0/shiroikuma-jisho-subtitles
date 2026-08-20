@@ -236,3 +236,32 @@ def lint(path: str) -> List[str]:
     if len({s for s in spans}) != len(spans):
         problems.append("two cues share identical start and end (the app merges them)")
     return problems
+
+
+def read_cues(path: str) -> List[str]:
+    """The cue texts of an SRT, in order, with markup already stripped.
+
+    Used when a folder has subtitles but no book: the existing cues become the
+    reference text, so the same alignment that places an EPUB's sentences can
+    re-place these against the converted audio.
+    """
+    try:
+        raw = open(path, encoding="utf-8-sig").read()
+    except (OSError, UnicodeDecodeError):
+        return []
+    out: List[str] = []
+    for block in re.split(r"\n\s*\n", raw.strip()):
+        lines = [ln for ln in block.split("\n") if ln.strip()]
+        if len(lines) < 2:
+            continue
+        body = [ln for ln in lines if "-->" not in ln and not ln.strip().isdigit()]
+        text = _WS.sub(" ", " ".join(body)).strip()
+        if text:
+            out.append(text)
+    return out
+
+
+def companion(audio_path: str) -> Optional[str]:
+    """The SRT beside an audio file, by the app's own basename rule."""
+    candidate = os.path.splitext(audio_path)[0] + ".srt"
+    return candidate if os.path.exists(candidate) else None

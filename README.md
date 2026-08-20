@@ -24,6 +24,19 @@ by hand, transcribing, and then splitting the *transcript* into sentences with
 abbreviation heuristics. This does the whole thing unattended, and the subtitle
 text is the **book's own**, not the transcriber's.
 
+## What you can point it at
+
+It works out what a directory is rather than asking for a mode:
+
+| The directory holds | What happens |
+|---|---|
+| an EPUB and audio | the full pipeline |
+| MP3s **and SRTs** | converts the audio, re-aligns those cues against it, rewrites them in place — no book needed |
+| MP3s alone | converts the audio and stops |
+| **folders of the above** | surveys them all, shows the plan, asks once, then works through them |
+
+`-n` on a library prints the plan and stops.
+
 ## What it handles without being told
 
 - **Many audio files.** 111 MP3s whose boundaries fall wherever the publisher
