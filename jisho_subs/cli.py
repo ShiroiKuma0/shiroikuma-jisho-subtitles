@@ -115,13 +115,18 @@ def _resolve_audio_only(args):
     return files
 
 
-def _confirm_delete(count: int, where: str, assume_yes: bool) -> bool:
+def _confirm_delete(count: int, where: str, assume_yes: bool,
+                    already_warned: bool = False) -> bool:
     """Ask before removing audio, defaulting to no.
 
     Same shape as srt-sentence-split.py's destructive mode: a loud warning, and
     a bare Enter means *don't*.  `-d` used to mean `--dir`, so a stale command
     line must not quietly delete a book.
     """
+    if already_warned:
+        # A library run warns once, up front, for the whole plan.  Repeating
+        # the block for every book is the noise 白い熊 asked to be rid of.
+        return True
     log("")
     log(f"{C.ERR}*** -d given: {count} MP3 file(s) in {where}")
     log(f"    will be PERMANENTLY DELETED (each one only after its M4B is")
@@ -224,7 +229,8 @@ def _delete_mp3s(args, stale, out_dir: str, assume_yes: bool) -> None:
     if not targets:
         log(f"{C.DIM}-d given, but there are no MP3s left to delete{C.RESET}")
         return
-    if not _confirm_delete(len(targets), out_dir, assume_yes):
+    if not _confirm_delete(len(targets), out_dir, assume_yes,
+                           getattr(args, "_warned_delete", False)):
         return
     deleted, kept = delete_sources(targets, out_dir, log=lambda m: log(m))
     log(f"  {C.OK}deleted {len(deleted)} MP3 file(s){C.RESET}")
@@ -724,8 +730,9 @@ def cmd_run(args) -> int:
             log(f"{C.DIM}nothing done.{C.RESET}")
             return 0
 
-    # Asked once, up front; never again per book.
+    # Asked once, up front; never again per book, and never warned again.
     args.yes = True
+    args._warned_delete = True
     args._quiet_report = True
     done = failed = 0
     for i, plan in enumerate([p for p in plans if p.busy], 1):
