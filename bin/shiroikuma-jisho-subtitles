@@ -320,12 +320,18 @@ ${C}CACHING${R}
     does the expensive work; later runs finish in seconds.  ${C}--force${R} redoes it.
 
 ${C}PERFORMANCE${R}
-    Measured on this machine, per hour of audio:
-      ${D}·${R} MP3 to M4B conversion   ~700x realtime  (all cores)
+    Measured on this machine:
+      ${D}·${R} MP3 to M4B conversion   ~330 MB/s, 0.03 s per file.  A stream copy
+                                is bound by the disk, not by how long the audio
+                                is: 30 GB of MP3 converts in about a minute and
+                                a half.
+      ${D}·${R} pause snapping          ~3700x realtime across the cores
       ${D}·${R} transcription, GPU       ~75x realtime  (RTX 5090, large-v3)
       ${D}·${R} transcription, CPU        ~4x realtime  (24 cores, int8)
-      ${D}·${R} pause snapping          ~450x realtime
-    A 7¾-hour book takes about eight minutes end to end on the GPU.
+
+    So a library of books that only need converting and resyncing costs
+    minutes; only a book with an EPUB, which must be transcribed, costs an
+    hour of GPU per eight hours of audio.
 
 ${C}EXAMPLES${R}
     ${D}# Everything: convert if needed, transcribe, align, write.${R}

@@ -174,6 +174,15 @@ worst case, 318 000 × 306 000 characters, 44.9 s, 40 MB peak). Chapter matching
 is exactly what makes subplz fail when audio files and text chapters do not
 correspond — which is the normal case.
 
+**Do not measure a stream copy in xrealtime.** The remux is bound by disk
+throughput, not audio duration — 330 MB/s, 0.03 s per file — so the library's
+30 GB converts in about ninety seconds. Reasoning from a xrealtime figure gave
+an estimate of an hour, forty times too high.
+
+**`refine()` runs across files in parallel**, because it is the only stage that
+reads all the audio and is therefore the whole cost of a resync run: 187x
+realtime sequential, 3700x across the cores.
+
 ## Known cost
 
 The whole-book alignment is fast for word languages (~1 s) but takes **several
