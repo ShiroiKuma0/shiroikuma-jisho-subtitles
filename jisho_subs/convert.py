@@ -161,15 +161,19 @@ def _convert_one(src: str, dst: str, tags: Optional[dict] = None,
 
 
 def numbering(tracks: Sequence[AudioFile]) -> dict:
-    """Map each source path to its ``(position, total)`` in the whole book.
+    """Map each track's *stem* to its ``(position, total)`` in the whole book.
 
     Track numbers must count the book, not the batch.  Converting one leftover
     file of twenty-two used to tag it `1/1`, and a run of four tagged the last
     one `4/4` — both wrong, and wrong in a way no player can recover from.
+
+    Keyed by stem rather than path on purpose: the same track is `01 x.mp3`
+    before conversion and `01 x.m4b` after, so a path-keyed map silently misses
+    every lookup the moment the extension changes.
     """
     stems = sorted({t.stem for t in tracks}, key=natural_key)
-    index = {stem: i for i, stem in enumerate(stems, 1)}
-    return {t.path: (index[t.stem], len(stems)) for t in tracks}
+    total = len(stems)
+    return {stem: (i, total) for i, stem in enumerate(stems, 1)}
 
 
 def convert(files: Sequence[AudioFile], out_dir: Optional[str] = None,
@@ -208,7 +212,7 @@ def convert(files: Sequence[AudioFile], out_dir: Optional[str] = None,
             if on_done:
                 on_done(f)
             return
-        track, total = (positions or {}).get(f.path, (index, len(todo)))
+        track, total = (positions or {}).get(f.stem, (index, len(todo)))
         tags, dropped = build_tags(info, read_tags(f.path), f.name, track, total)
         if dropped:
             discarded.append((f.name, dropped))
@@ -308,7 +312,7 @@ def retag(files: Sequence[AudioFile], out_dir: Optional[str] = None,
         index, f = item
         if on_start:
             on_start(f)
-        track, total = (positions or {}).get(f.path, (index, len(files)))
+        track, total = (positions or {}).get(f.stem, (index, len(files)))
         tags, dropped = build_tags(info, read_tags(f.path), f.name, track, total)
         if dropped:
             discarded.append((f.name, dropped))

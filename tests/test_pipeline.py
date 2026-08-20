@@ -854,8 +854,10 @@ def test_track_numbers_count_the_book_not_the_batch():
 
     tracks = [T("/b/22 x.mp3")] + [T(f"/b/{i:02d} x.m4b") for i in range(1, 22)]
     n = numbering(tracks)
-    assert n["/b/22 x.mp3"] == (22, 22)
-    assert n["/b/01 x.m4b"] == (1, 22)
+    assert n["22 x"] == (22, 22)
+    assert n["01 x"] == (1, 22)
+    # Keyed by stem, so the same track resolves before and after conversion.
+    assert numbering([T("/b/01 x.mp3")])["01 x"] == (1, 1)
 
 
 def test_numbering_survives_a_split_conversion(tmp_path):
