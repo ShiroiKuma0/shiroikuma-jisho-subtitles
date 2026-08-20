@@ -476,11 +476,15 @@ def build_parser() -> argparse.ArgumentParser:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 examples:
-  jisho-subs -d ~/tmp/subtitles/1                 # language read from the EPUB
-  jisho-subs -d ~/books/Lazar -l de --report r.txt
-  jisho-subs sentences -d ~/books/Lazar           # just the reference text
-  jisho-subs lint ~/books/Lazar/audio             # check written SRTs
-  jisho-subs probe -d ~/books/Lazar               # what would be used
+  jisho-subs ~/tmp/subtitles/1              # language read from the EPUB
+  jisho-subs ~/books/Lazar -d               # ...then delete the MP3s (asks)
+  jisho-subs ~/books/Lazar -d -y            # ...without asking
+  jisho-subs sentences ~/books/Lazar        # just the reference text
+  jisho-subs probe ~/books/Lazar            # what would be used
+  jisho-subs lint ~/books/Lazar/audio       # check written SRTs
+
+The full manual, including what -d deletes and what protects you from it,
+is in the wrapper: shiroikuma-jisho-subtitles -h
 """)
     p.add_argument("--version", action="version", version=f"jisho-subs {__version__}")
 
@@ -558,7 +562,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         C.enable()
 
     parser = build_parser()
-    # Bare `jisho-subs -d DIR` means `run`.
+    # A bare directory (or any option) means `run`.
     known = {"run", "sentences", "probe", "lint", "convert"}
     if argv and argv[0] not in known and not argv[0] in ("-h", "--help", "--version"):
         argv.insert(0, "run")
