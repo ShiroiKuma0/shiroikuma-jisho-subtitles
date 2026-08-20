@@ -493,8 +493,10 @@ is in the wrapper: shiroikuma-jisho-subtitles -h
                         help="book directory holding the EPUB and the audio")
     common.add_argument("--dir", dest="directory_opt",
                         help="same as the positional argument")
-    common.add_argument("--epub", help="reference EPUB or PDF (overrides -d)")
-    common.add_argument("--audio", help="directory of audio files (overrides -d)")
+    common.add_argument("--epub",
+                        help="reference EPUB or PDF (overrides the directory)")
+    common.add_argument("--audio",
+                        help="directory of audio files (overrides the directory)")
     common.add_argument("-l", "--lang",
                         help="language code; read from the EPUB when omitted")
 
@@ -514,8 +516,9 @@ is in the wrapper: shiroikuma-jisho-subtitles -h
     run.add_argument("--keep-mp3", dest="convert", action="store_false",
                      help="do not convert MP3 to M4B first (the app cannot seek "
                           "MP3, so auto-pause will land on the wrong sentence)")
-    run.add_argument("--convert-to", help="where converted audio should go "
-                                          "(default: a sibling '… [m4b]' directory)")
+    run.add_argument("--convert-to",
+                     help="where converted audio should go "
+                          "(default: beside the MP3 it came from)")
     run.add_argument("--jobs", type=int, help="parallel conversions")
     run.add_argument("-d", "--delete-mp3", dest="delete_mp3", action="store_true",
                      help="DESTRUCTIVE: delete each MP3 once its M4B is verified. "
