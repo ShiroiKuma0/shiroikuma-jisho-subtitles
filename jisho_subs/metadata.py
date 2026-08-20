@@ -32,7 +32,16 @@ AUDIOBOOK_CODE = '197'
 
 #: ISO 639-2, for the MP4 language atom.
 ISO3 = {'ja': 'jpn', 'de': 'deu', 'en': 'eng', 'ru': 'rus',
-        'cs': 'ces', 'pl': 'pol', 'fr': 'fra', 'es': 'spa', 'it': 'ita'}
+        'cs': 'ces', 'pl': 'pol', 'fr': 'fra', 'es': 'spa', 'it': 'ita',
+        'nl': 'nld', 'sk': 'slk', 'uk': 'ukr'}
+
+#: Latin-script languages worth looking a title up in.  Restricted on purpose:
+#: with every installed dictionary in play, Dutch and Spanish score highly on
+#: English titles and turn a clear answer into a tie.
+DICTIONARY_LANGUAGES = ('en', 'de', 'pl', 'cs', 'fr')
+
+#: Words shorter than this match in every language and mean nothing.
+DICTIONARY_MIN_WORD = 4
 
 #: An inverted article belongs to the title: "Achilles trap, the".
 ARTICLES = {'the', 'a', 'an', 'der', 'die', 'das', 'le', 'la', 'les', 'el',
@@ -194,7 +203,46 @@ def detect_language(info: 'BookInfo', filenames=(), tags=()) -> Optional[str]:
     for tag in tags:
         if isinstance(tag, dict):
             texts += [tag.get(k) for k in ('title', 'album', 'artist', 'comment')]
-    return guess_language([demojibake(t) for t in texts if t])
+    guess = guess_language([demojibake(t) for t in texts if t])
+    if guess:
+        return guess
+    return _dictionary_language(info)
+
+
+def _dictionary_language(info: 'BookInfo') -> Optional[str]:
+    """Look the title's words up, for a title that carries no other signal.
+
+    «Beyond Order», «Greenlights», «Nineteen eighty-four» are plainly English,
+    but hold no diacritic, no distinctive script and no function word, so no
+    amount of hand-written rules will reach them.  A dictionary does — and the
+    system already ships them, so this costs nothing to try and degrades to
+    None where none are installed.
+
+    Only the title and author are looked up, not the filenames: track names are
+    full of numbers and publisher boilerplate, and author names alone match
+    everywhere.
+    """
+    try:
+        from . import dictionaries
+    except ImportError:                      # pragma: no cover
+        return None
+    text = f"{info.book or ''} {info.author or ''}"
+    words = [w for w in re.findall(r'[^\W\d_]+', text.lower(), re.UNICODE)
+             if len(w) >= DICTIONARY_MIN_WORD]
+    if not words:
+        return None
+    scores = dictionaries.score(words, DICTIONARY_LANGUAGES)
+    if not scores:
+        return None
+    ranked = sorted(scores.items(), key=lambda kv: -kv[1])
+    winner, top = ranked[0]
+    runner_up = ranked[1][1] if len(ranked) > 1 else 0.0
+    # A title's proper nouns are in nobody's dictionary, so the bar is a share
+    # of the words; the margin is what keeps a near-tie from reading as an
+    # answer.
+    if top >= 0.34 and top - runner_up >= 0.15:
+        return winner
+    return None
 
 
 def demojibake(text: Optional[str]) -> Optional[str]:

@@ -126,7 +126,19 @@ Four traps, each with a test:
   `Erw・ungen` carries U+30FB, which declared Der Zauberberg Japanese. The
   script test matches kana letters only.
 
-It declines rather than guess on thin evidence: 116 of 127 books resolve.
+When the rules find nothing, `dictionaries.py` looks the title's words up in
+the system's hunspell dictionaries. That is what reaches «Beyond Order»,
+«Greenlights», «Nineteen eighty-four» — plainly English, but holding no
+diacritic, no distinctive script and no function word. Three details matter:
+only the title and author are looked up (track names are numbers and
+boilerplate), words must be four letters or more (three-letter tokens matched
+everywhere — "MMA" scored Polish 1.00), and the candidate languages are
+restricted to en/de/pl/cs/fr because with every installed dictionary in play
+Dutch and Spanish score highly on English titles and turn a clear answer into a
+tie. The German and Polish dictionaries are ISO-8859, not UTF-8.
+
+Dictionaries are entirely optional; without them the tool falls back to its own
+word lists. With them, 124 of 127 books resolve.
 
 **`und` cannot be removed, only replaced.** MP4's `mdhd` box carries a
 mandatory 16-bit packed language field; a file with no language reads `und`

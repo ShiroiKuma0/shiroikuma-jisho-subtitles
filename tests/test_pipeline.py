@@ -1081,3 +1081,74 @@ def test_english_words_that_are_also_german_are_not_used():
     from jisho_subs.metadata import _WORDS
     for word in ("in", "an", "all", "her", "was", "will", "man", "die", "wie"):
         assert word not in _WORDS["en"], f"{word!r} is ambiguous"
+
+
+# -- looking a title up in a real dictionary -----------------------------
+
+def _needs_dictionaries(*languages):
+    from jisho_subs import dictionaries
+    have = dictionaries.available()
+    missing = [l for l in languages if l not in have]
+    if missing:
+        pytest.skip(f"no hunspell dictionary for {missing}")
+
+
+def test_dictionaries_are_optional():
+    """A machine without hunspell must still run, just with fewer answers."""
+    from jisho_subs import dictionaries
+    assert isinstance(dictionaries.available(), tuple)
+    assert dictionaries.score([], ()) == {}
+    assert dictionaries.best([]) is None
+
+
+def test_a_plain_english_title_is_recognised():
+    """No diacritic, no distinctive script, no function word — only a lookup."""
+    _needs_dictionaries("en", "de", "pl", "cs")
+    from jisho_subs.metadata import detect_language, parse_directory
+    for name in ("Beyond Order, Jordan B. Peterson -- [197] (2021)",
+                 "Right thing, right now, Ryan Holiday -- [197] (2024)",
+                 "Nineteen eighty-four, George Orwell, Simon Prebble -- [197]"):
+        assert detect_language(parse_directory(name)) == "en", name
+
+
+def test_the_dictionary_does_not_override_a_stated_language():
+    _needs_dictionaries("en")
+    from jisho_subs.metadata import detect_language, parse_directory
+    info = parse_directory("Empuzjon, Olga Tokarczuk -- [197][942] (2022)")
+    assert detect_language(info) == "pl"
+
+
+def test_the_dictionary_does_not_override_the_rules():
+    """Script and diacritics decide first; the lookup only fills the gaps."""
+    _needs_dictionaries("en", "de")
+    from jisho_subs.metadata import detect_language, parse_directory
+    assert detect_language(parse_directory(
+        "羅生門, 芥川龍之介 -- [197] (1915)")) == "ja"
+    assert detect_language(parse_directory(
+        "Prowadź swój pług przez kości umarłych, Olga Tokarczuk -- [197]")) == "pl"
+
+
+def test_short_words_are_not_looked_up():
+    """Three-letter tokens match everywhere; "MMA" scored Polish 1.00."""
+    _needs_dictionaries("pl")
+    from jisho_subs.metadata import detect_language, parse_directory
+    assert detect_language(parse_directory("MMA")) is None
+
+
+def test_a_near_tie_is_not_an_answer():
+    _needs_dictionaries("en", "de", "cs")
+    from jisho_subs.metadata import detect_language, parse_directory
+    # "Meditations" is recognised by English, German and Czech alike.
+    assert detect_language(parse_directory("Meditations 3 (180) Marcus Aurelius")) \
+        is None
+
+
+def test_dictionary_encodings_are_handled():
+    """The German and Polish dictionaries are ISO-8859, not UTF-8."""
+    _needs_dictionaries("de", "pl")
+    from jisho_subs import dictionaries
+    german = dictionaries.words_for("de")
+    polish = dictionaries.words_for("pl")
+    assert len(german) > 100000 and len(polish) > 100000
+    assert any("ü" in w for w in list(german)[:5000]) or "über" in german
+    assert any("ł" in w for w in list(polish)[:5000]) or "łatwy" in polish
