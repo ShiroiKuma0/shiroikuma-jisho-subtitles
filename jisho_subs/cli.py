@@ -249,6 +249,9 @@ def _report_tags(result) -> None:
                          ("language", info.iso3)):
         if value:
             log(f"    {label:<9} {value}")
+    if not info.iso3:
+        log(f"    {C.DIM}language  unknown — MP4 requires the field, so it "
+            f"reads 'und'; pass -l to set it{C.RESET}")
     total = result.track_total or (len(result.made) + len(result.skipped))
     log(f"    {'track':<9} N/{total}")
     kept = len(result.titled or [])
@@ -368,6 +371,7 @@ def cmd_convert(args) -> int:
                            tag=f"{C.TAG}[jisho-subs]{C.RESET} ")
             result = retag(files, positions=_book_numbering(files, []),
                            jobs=args.jobs,
+                           language=getattr(args, "lang", None),
                            on_start=lambda f: bar.note(f.name),
                            on_done=lambda f: bar.advance(f.name))
             bar.close(f"{len(result.made)} re-tagged")
@@ -390,6 +394,7 @@ def cmd_convert(args) -> int:
     result = convert(stale, out_dir, jobs=args.jobs, force=args.force,
                      reencode=args.reencode,
                      positions=_book_numbering(files, stale),
+                     language=getattr(args, "lang", None),
                      on_start=lambda f: bar.note(f.name),
                      on_done=lambda f: bar.advance(f.name, weight=f.duration))
     bar.close(f"{len(result.made)} converted"
@@ -491,7 +496,7 @@ def cmd_run(args) -> int:
         cbar = Progress(len(stale), "converting", tag=f"{C.TAG}[jisho-subs]{C.RESET} ")
         result = convert(stale, out_dir, jobs=args.jobs, force=args.force,
                          reencode=args.reencode,
-                         positions=_book_numbering(files, stale),
+                         positions=_book_numbering(files, stale), language=lang,
                          on_start=lambda f: cbar.note(f.name),
                          on_done=lambda f: cbar.advance(f.name, weight=f.duration))
         cbar.close(f"{len(result.made)} converted"

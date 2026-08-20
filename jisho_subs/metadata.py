@@ -119,6 +119,20 @@ class BookInfo:
     def iso3(self) -> Optional[str]:
         return ISO3.get(self.language or '')
 
+    def with_language(self, language: Optional[str]) -> 'BookInfo':
+        """A copy carrying *language* when the folder name did not supply one.
+
+        MP4 stores language in a mandatory field, so a file with none reads
+        `und` — there is no way to leave it out.  The fix is therefore not to
+        omit the tag but to know the language: the EPUB states it, `-l` states
+        it, and only a bare folder of audio leaves it genuinely unknown.
+        """
+        if self.language or not language:
+            return self
+        clone = BookInfo(**{k: v for k, v in vars(self).items()})
+        clone.language = language
+        return clone
+
 
 def _looks_like_name(s: str) -> bool:
     words = s.replace('&', ' ').split()

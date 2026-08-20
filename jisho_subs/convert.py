@@ -179,7 +179,8 @@ def numbering(tracks: Sequence[AudioFile]) -> dict:
 def convert(files: Sequence[AudioFile], out_dir: Optional[str] = None,
             jobs: Optional[int] = None, force: bool = False,
             on_start=None, on_done=None, reencode: bool = False,
-            positions: Optional[dict] = None) -> ConvertResult:
+            positions: Optional[dict] = None,
+            language: Optional[str] = None) -> ConvertResult:
     """Convert every non-seek-accurate file into *out_dir*.
 
     *positions* maps a source path to its ``(track, total)`` across the whole
@@ -193,7 +194,8 @@ def convert(files: Sequence[AudioFile], out_dir: Optional[str] = None,
 
     # The folder name is the reliable source for book, author, year and
     # language; the per-file tags are not.
-    info = parse_directory(os.path.dirname(os.path.abspath(todo[0].path)))
+    info = parse_directory(os.path.dirname(os.path.abspath(todo[0].path))) \
+        .with_language(language)
 
     made: List[str] = []
     skipped: List[str] = []
@@ -289,7 +291,8 @@ def delete_sources(files: Sequence[AudioFile], out_dir: str,
 
 def retag(files: Sequence[AudioFile], out_dir: Optional[str] = None,
           positions: Optional[dict] = None, jobs: Optional[int] = None,
-          on_start=None, on_done=None) -> ConvertResult:
+          on_start=None, on_done=None,
+          language: Optional[str] = None) -> ConvertResult:
     """Rewrite the tags on already-converted audio, without re-encoding it.
 
     Needed because tags cannot be revised retroactively and the source MP3s may
@@ -301,7 +304,7 @@ def retag(files: Sequence[AudioFile], out_dir: Optional[str] = None,
     if not files:
         return ConvertResult([], [], [], out_dir or "", None, [], [], {}, 0)
     out_dir = out_dir or os.path.dirname(os.path.abspath(files[0].path))
-    info = parse_directory(out_dir)
+    info = parse_directory(out_dir).with_language(language)
 
     made: List[str] = []
     failed: List[tuple] = []

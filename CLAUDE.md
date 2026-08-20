@@ -109,6 +109,13 @@ Cyrillic; without that it would mangle `Anéantir`, `Zoë Schiffer` and `Sněže
 Keep that check if you touch it, and keep the tests that assert those exact
 strings survive.
 
+**`und` cannot be removed, only replaced.** MP4's `mdhd` box carries a
+mandatory 16-bit packed language field; a file with no language reads `und`
+(0x55c4), and so do 白い熊's untouched publisher M4Bs. The answer is therefore
+never to omit the tag but to know the language — the EPUB states it, `-l` states
+it, `BookInfo.with_language()` fills it in — and to say plainly when it is
+genuinely unknown.
+
 MP4 keeps `language` on the **stream**, not the container. A format-level
 `-metadata language=…` is accepted by ffmpeg and silently dropped, leaving the
 track marked `und`.
