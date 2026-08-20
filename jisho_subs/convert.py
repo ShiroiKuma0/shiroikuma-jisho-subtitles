@@ -27,7 +27,7 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from typing import List, Optional, Sequence
 
-from .audio import SEEK_ACCURATE, AudioFile, probe, read_tags
+from .audio import SEEK_ACCURATE, AudioFile, natural_key, probe, read_tags
 from .metadata import BookInfo, build_tags, parse_directory
 
 #: Fallback AAC bitrate when the source's own rate cannot be read.
@@ -51,6 +51,8 @@ class ConvertResult:
     titled: List[tuple] = None
     #: How each file was produced, as {method: count}.
     methods: dict = None
+    #: The book's track total, as written into the tags.
+    track_total: int = 0
 
 
 def needs_conversion(files: Sequence[AudioFile]) -> List[AudioFile]:
@@ -158,10 +160,27 @@ def _convert_one(src: str, dst: str, tags: Optional[dict] = None,
     return (last or "ffmpeg failed"), None
 
 
+def numbering(tracks: Sequence[AudioFile]) -> dict:
+    """Map each source path to its ``(position, total)`` in the whole book.
+
+    Track numbers must count the book, not the batch.  Converting one leftover
+    file of twenty-two used to tag it `1/1`, and a run of four tagged the last
+    one `4/4` — both wrong, and wrong in a way no player can recover from.
+    """
+    stems = sorted({t.stem for t in tracks}, key=natural_key)
+    index = {stem: i for i, stem in enumerate(stems, 1)}
+    return {t.path: (index[t.stem], len(stems)) for t in tracks}
+
+
 def convert(files: Sequence[AudioFile], out_dir: Optional[str] = None,
             jobs: Optional[int] = None, force: bool = False,
-            on_start=None, on_done=None, reencode: bool = False) -> ConvertResult:
-    """Convert every non-seek-accurate file into *out_dir*."""
+            on_start=None, on_done=None, reencode: bool = False,
+            positions: Optional[dict] = None) -> ConvertResult:
+    """Convert every non-seek-accurate file into *out_dir*.
+
+    *positions* maps a source path to its ``(track, total)`` across the whole
+    book; without it the numbering falls back to this batch alone.
+    """
     todo = needs_conversion(files)
     if not todo:
         return ConvertResult([], [], [], out_dir or "")
@@ -189,8 +208,8 @@ def convert(files: Sequence[AudioFile], out_dir: Optional[str] = None,
             if on_done:
                 on_done(f)
             return
-        tags, dropped = build_tags(info, read_tags(f.path), f.name,
-                                   index, len(todo))
+        track, total = (positions or {}).get(f.path, (index, len(todo)))
+        tags, dropped = build_tags(info, read_tags(f.path), f.name, track, total)
         if dropped:
             discarded.append((f.name, dropped))
         elif tags.get("title"):
@@ -209,8 +228,9 @@ def convert(files: Sequence[AudioFile], out_dir: Optional[str] = None,
     with ThreadPoolExecutor(max_workers=jobs) as pool:
         list(pool.map(work, enumerate(todo, 1)))
 
+    track_total = max((t for _, t in (positions or {}).values()), default=len(todo))
     return ConvertResult(made, skipped, failed, out_dir, info, discarded,
-                         titled, methods)
+                         titled, methods, track_total)
 
 
 def converted_files(out_dir: str) -> List[AudioFile]:

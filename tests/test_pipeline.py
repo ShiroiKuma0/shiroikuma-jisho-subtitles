@@ -841,3 +841,34 @@ def test_the_fallback_bitrate_follows_the_source(tmp_path):
         assert MIN_BITRATE <= got <= MAX_BITRATE
         assert abs(got - min(max(rate, MIN_BITRATE), MAX_BITRATE)) <= 8, \
             f"{rate}k source produced {got}k"
+
+
+def test_track_numbers_count_the_book_not_the_batch():
+    """Converting one leftover of twenty-two used to tag it 1/1."""
+    from jisho_subs.convert import numbering
+
+    class T:
+        def __init__(self, p):
+            self.path = p
+            self.stem = os.path.splitext(os.path.basename(p))[0]
+
+    tracks = [T("/b/22 x.mp3")] + [T(f"/b/{i:02d} x.m4b") for i in range(1, 22)]
+    n = numbering(tracks)
+    assert n["/b/22 x.mp3"] == (22, 22)
+    assert n["/b/01 x.m4b"] == (1, 22)
+
+
+def test_numbering_survives_a_split_conversion(tmp_path):
+    from jisho_subs.audio import probe, read_tags
+    from jisho_subs.convert import convert, have_ffmpeg, numbering, target_dir
+    if not have_ffmpeg():
+        pytest.skip("ffmpeg not available")
+    srcs = [probe(_make_mp3(tmp_path / f"{i:02d} t.mp3", seconds=1))
+            for i in range(1, 5)]
+    positions = numbering(srcs)
+    # Two separate runs, as happens when a conversion is resumed.
+    convert(srcs[:2], target_dir(srcs), positions=positions)
+    convert(srcs[2:], target_dir(srcs), positions=positions)
+    totals = {read_tags(str(tmp_path / f"{i:02d} t.m4b"))["track"].split("/")[1]
+              for i in range(1, 5)}
+    assert totals == {"4"}, f"totals disagree across the book: {totals}"

@@ -44,7 +44,8 @@ class Steps:
     def __call__(self, msg: str) -> None:
         self.n += 1
         print(f"\n{C.TAG}[jisho-subs]{C.RESET} "
-              f"{C.HEAD}{self.n}/{self.total}  {msg}{C.RESET}", file=sys.stderr)
+              f"{C.DIM}step {self.n} of {self.total}{C.RESET}  "
+              f"{C.HEAD}{msg}{C.RESET}", file=sys.stderr)
 
 
 def step(msg: str) -> None:
@@ -141,6 +142,38 @@ def _confirm_delete(count: int, where: str, assume_yes: bool) -> bool:
     return False
 
 
+def _check_track_numbering(files) -> None:
+    """Warn when the book's track totals disagree.
+
+    A book converted across two runs carries the totals each run knew about —
+    five files tagged "n/5" and a sixth tagged "6/6" — because tags written
+    earlier cannot be revised without re-converting.  Players sort on this, so
+    say so rather than leave it to be discovered on the phone.
+    """
+    from .audio import read_tags
+
+    totals = {}
+    for f in files:
+        raw = (read_tags(f.path).get("track") or "").strip()
+        if "/" in raw:
+            totals.setdefault(raw.split("/", 1)[1].strip(), []).append(f.name)
+    if not totals:
+        return
+    expected = str(len(files))
+    if len(totals) > 1 or expected not in totals:
+        log(f"  {C.WARN}track numbering is inconsistent: "
+            f"{', '.join('n/' + k for k in sorted(totals))} "
+            f"across {len(files)} tracks{C.RESET}")
+        log(f"  {C.DIM}earlier runs tagged what they knew; --force re-converts "
+            f"and renumbers the whole book{C.RESET}")
+
+
+def _book_numbering(files, stale):
+    """Track numbers counted across the whole book, not this batch."""
+    from .convert import numbering
+    return numbering(list(files) + list(stale))
+
+
 def _shadowed_sources(args):
     """MP3s that discover() hid because an M4B of the same name exists.
 
@@ -216,7 +249,8 @@ def _report_tags(result) -> None:
                          ("language", info.iso3)):
         if value:
             log(f"    {label:<9} {value}")
-    log(f"    {'track':<9} N/{len(result.made) + len(result.skipped)}")
+    total = result.track_total or (len(result.made) + len(result.skipped))
+    log(f"    {'track':<9} N/{total}")
     kept = len(result.titled or [])
     dropped = len(result.discarded or [])
     if kept:
@@ -336,6 +370,7 @@ def cmd_convert(args) -> int:
     bar = Progress(len(stale), "converting", tag=f"{C.TAG}[jisho-subs]{C.RESET} ")
     result = convert(stale, out_dir, jobs=args.jobs, force=args.force,
                      reencode=args.reencode,
+                     positions=_book_numbering(files, stale),
                      on_start=lambda f: bar.note(f.name),
                      on_done=lambda f: bar.advance(f.name, weight=f.duration))
     bar.close(f"{len(result.made)} converted"
@@ -345,6 +380,7 @@ def cmd_convert(args) -> int:
     if result.failed:
         return 1
     _report_tags(result)
+    _check_track_numbering(_resolve_audio_only(args))
     if args.delete_mp3:
         _delete_mp3s(args, stale, result.out_dir, args.yes)
     else:
@@ -413,10 +449,19 @@ def cmd_run(args) -> int:
     if stale:
         # The app cannot seek MP3: its own warning says auto-pause "will fire at
         # the wrong sentence boundaries", which defeats the entire workflow.
-        step(f"converting {len(stale)} MP3 files to M4B")
+        already = len(files) - len(stale)
+        if already > 0:
+            step(f"converting the remaining {len(stale)} of "
+                 f"{already + len(stale)} tracks to M4B")
+        else:
+            step(f"converting {len(stale)} tracks to M4B")
         if not have_ffmpeg():
             die("ffmpeg is needed to convert MP3 to M4B; pass --keep-mp3 to skip")
         out_dir = args.convert_to or target_dir(stale)
+        if already > 0:
+            log(f"  {already} track(s) were converted by an earlier run and are "
+                f"left as they are")
+            log(f"  {C.DIM}(--force redoes them){C.RESET}")
         log("  the app cannot seek MP3 accurately, so auto-pause would fire at")
         log("  the wrong sentence boundaries. The M4B is written beside each")
         log("  MP3 under the same name; the MP3 itself is left untouched.")
@@ -427,6 +472,7 @@ def cmd_run(args) -> int:
         cbar = Progress(len(stale), "converting", tag=f"{C.TAG}[jisho-subs]{C.RESET} ")
         result = convert(stale, out_dir, jobs=args.jobs, force=args.force,
                          reencode=args.reencode,
+                         positions=_book_numbering(files, stale),
                          on_start=lambda f: cbar.note(f.name),
                          on_done=lambda f: cbar.advance(f.name, weight=f.duration))
         cbar.close(f"{len(result.made)} converted"
@@ -439,7 +485,15 @@ def cmd_run(args) -> int:
         if args.delete_mp3:
             _delete_mp3s(args, stale, result.out_dir, args.yes)
         files = _rediscover(result.out_dir)
-        log(f"  now working on {len(files)} M4B files")
+        m4b = sum(1 for f in files if f.path.lower().endswith((".m4b", ".m4a")))
+        log("")
+        if m4b == len(files):
+            log(f"  {C.OK}✓ all {len(files)} tracks of this book are now M4B"
+                f"{C.RESET}")
+        else:
+            log(f"  {C.WARN}{m4b} of {len(files)} tracks are M4B; the rest could "
+                f"not be converted{C.RESET}")
+        _check_track_numbering(files)
         if (result.made or result.skipped) and not args.delete_mp3:
             mp3s = os.path.join(out_dir, "*.mp3")
             log("")

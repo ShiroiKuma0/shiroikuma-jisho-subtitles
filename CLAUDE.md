@@ -53,6 +53,13 @@ typically a few milliseconds *before* a pause rather than inside it, which is
 why the test covers a fragment-then-pause case and not just "start is in
 silence".
 
+**Track numbers must count the book, not the batch.** `convert()` takes a
+`positions` map built from every track in the folder; without it, converting one
+leftover file of twenty-two tags it `1/1`. Tags already written cannot be
+revised without re-converting, so a book done in two runs carries two different
+totals — `_check_track_numbering()` reports that rather than leaving it to be
+found on the phone.
+
 **The conversion is a lossless remux, and `-f mp4` is what makes it possible.**
 A `.m4b` extension selects ffmpeg's *ipod* muxer, which refuses MP3 outright —
 "Could not find tag for codec mp3" — so without `-f mp4` the remux silently
