@@ -265,3 +265,31 @@ def companion(audio_path: str) -> Optional[str]:
     """The SRT beside an audio file, by the app's own basename rule."""
     candidate = os.path.splitext(audio_path)[0] + ".srt"
     return candidate if os.path.exists(candidate) else None
+
+
+def read_entries(path: str) -> List[tuple]:
+    """An SRT as ``(start, end, text)`` triples, in order."""
+    try:
+        raw = open(path, encoding="utf-8-sig").read()
+    except (OSError, UnicodeDecodeError):
+        return []
+    out: List[tuple] = []
+    for block in re.split(r"\n\s*\n", raw.strip()):
+        lines = [ln for ln in block.split("\n") if ln.strip()]
+        if len(lines) < 2:
+            continue
+        stamp = next((ln for ln in lines if "-->" in ln), None)
+        if not stamp:
+            continue
+        m = _TIMESTAMP.match(stamp.strip())
+        if not m:
+            continue
+        g = [int(x) for x in m.groups()]
+        start = g[0] * 3600 + g[1] * 60 + g[2] + g[3] / 1000
+        end = g[4] * 3600 + g[5] * 60 + g[6] + g[7] / 1000
+        body = [ln for ln in lines
+                if "-->" not in ln and not ln.strip().isdigit()]
+        text = _WS.sub(" ", " ".join(body)).strip()
+        if text:
+            out.append((start, end, text))
+    return out

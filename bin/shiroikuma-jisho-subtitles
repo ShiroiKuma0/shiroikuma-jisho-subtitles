@@ -55,10 +55,15 @@ ${C}WHAT YOU CAN POINT IT AT${R}
     than asking you to remember a mode.  Three shapes are recognised:
 
       ${B}A book with its EPUB${R}      the full pipeline, as described below
-      ${B}A folder of MP3s and SRTs${R} converts the audio, then re-aligns those
-                              existing cues against it.  The subtitles are the
-                              reference text; no book is needed.  They are
-                              rewritten in place.
+      ${B}A folder of MP3s and SRTs${R} converts the audio, then moves those cues
+                              onto it and re-snaps them to the pauses.  ${B}No
+                              transcription${R}: the conversion is lossless, so the
+                              audio is bit-identical and only its origin moves,
+                              by the encoder delay.  There is no drift to
+                              rediscover.  ${C}--realign${R} transcribes and aligns
+                              properly instead, for an SRT that is actually
+                              wrong rather than merely moved.  Either way the
+                              SRTs are rewritten in place.
       ${B}A folder of MP3s alone${R}    converts the audio and stops.  Nothing to
                               make subtitles from, so none are made.
 
@@ -238,7 +243,14 @@ ${C}OPTIONS${R}
     ${C}-l, --lang${R} CODE       de, ja, pl, ru, en, fr, es, it, nl, zh.  Read from
                           the EPUB's own metadata when omitted.
 
-  ${B}run${R} — the whole pipeline ${D}(the default; the word may be left out)${R}
+  ${B}What to do${R} ${D}(default: the whole pipeline)${R}
+    ${C}-c, --convert${R}         convert the audio to M4B and stop
+    ${C}--sentences${R}           print the reference text as it will be cued
+    ${C}--probe${R}               show what would be used, and do nothing
+    ${C}--lint${R}                check SRTs against the app's parser
+    ${D}These four are mutually exclusive.${R}
+
+  ${B}The pipeline${R}
     ${C}-n, --dry-run${R}         plan only.  Converts nothing, deletes nothing,
                           writes nothing — it aligns and reports so you can see
                           what would happen.  On an unconverted book it aligns
@@ -270,25 +282,12 @@ ${C}OPTIONS${R}
                           timing, its confidence, and what was dropped
     ${C}-v, --verbose${R}         name every file as it is written
 
-  ${B}convert${R} — fix the audio format and stop
-    ${C}-d, --delete-mp3${R}      ${E}DESTRUCTIVE${R}: delete each MP3 once its M4B verifies
-    ${C}-y, --yes${R}             skip the confirmation
-    ${C}--convert-to${R} DIR      where the M4Bs go
-    ${C}--jobs${R} N              parallel conversions
-    ${C}--reencode${R}            re-encode to AAC rather than copy losslessly
-    ${C}--force${R}               re-convert even where an M4B already exists.  When
+    ${C}--force${R}               redo work already done.  For ${C}-c${R} that means
+                          re-converting; where nothing needs converting it
                           nothing needs converting it ${B}re-tags in place${R} instead,
                           rewriting the tags without touching the audio — the
                           only way to correct a book whose source MP3s have
                           already been deleted
-
-  ${B}sentences${R} — print the reference text as it will be cued
-  ${B}probe${R} — say what would be used, and do nothing
-    ${D}Both take only the common options above.  Neither needs any audio;${R}
-    ${D}sentences works from the EPUB alone.${R}
-
-  ${B}lint${R} — check SRTs against the app's parser
-    ${C}AUDIODIR${R} or ${C}FILE...${R}     a directory of .srt files, or named files
 
   ${B}Anywhere${R}
     ${C}-h, --help${R}            this manual

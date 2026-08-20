@@ -395,6 +395,16 @@ def cmd_convert(args) -> int:
     if not have_ffmpeg():
         die("ffmpeg not found on PATH")
     out_dir = args.convert_to or target_dir(stale)
+    if args.dry_run:
+        # --dry-run means nothing is written, and re-encoding a whole
+        # audiobook is emphatically writing something.
+        log(f"{C.WARN}dry run — would convert {len(stale)} file(s){C.RESET}")
+        log(f"  → {out_dir}")
+        for f in stale[:8]:
+            log(f"    {f.name}")
+        if len(stale) > 8:
+            log(f"    … and {len(stale) - 8} more")
+        return 0
     log(f"converting {len(stale)} files → {out_dir}")
     bar = Progress(len(stale), "converting", tag=f"{C.TAG}[jisho-subs]{C.RESET} ")
     result = convert(stale, out_dir, jobs=args.jobs, force=args.force,
@@ -422,7 +432,7 @@ def cmd_convert(args) -> int:
 def cmd_lint(args) -> int:
     from .srt import lint
     targets: List[str] = []
-    for path in args.paths:
+    for path in (args.paths or ([args.directory] if args.directory else [])):
         if os.path.isdir(path):
             targets.extend(sorted(os.path.join(path, f)
                                   for f in os.listdir(path) if f.endswith(".srt")))
@@ -500,6 +510,74 @@ def _language_for(args, plan, files):
     die("could not determine the language; pass -l/--lang")
 
 
+def _resync_from_srt(args, plan, files) -> bool:
+    """Move existing cues onto the converted audio, without transcribing it.
+
+    The conversion is a lossless remux: the decoded audio is bit-identical and
+    only the origin moves, by the encoder delay — 25 ms on the book this was
+    measured against.  There is therefore no drift to rediscover, and
+    transcribing hundreds of hours to recover timings that already fit is work
+    with no product.
+
+    Snapping is absolute rather than a shift: voice activity is read from the
+    M4B itself, so each cue end is placed in that file's real pause and the
+    small offset corrects itself.  `--realign` runs the full alignment instead,
+    for an SRT that is actually wrong rather than merely moved.
+    """
+    from .align import Cue
+    from .asr import default_cache_dir
+    from .refine import refine
+    from .segment import Sentence
+    from .srt import companion, read_entries, write_for_files
+
+    cues: List[Cue] = []
+    sources = 0
+    for index, audio in enumerate(files):
+        path = companion(audio.path)
+        if not path:
+            continue
+        entries = read_entries(path)
+        if not entries:
+            continue
+        sources += 1
+        name = os.path.basename(path)
+        for start, end, text in entries:
+            cues.append(Cue(Sentence(text, name, False, len(cues)),
+                            index, start, end, 1.0))
+    if not cues:
+        log(f"  {C.WARN}no cues found in the existing SRTs{C.RESET}")
+        return False
+    log(f"  {len(cues)} cues from {sources} SRT file(s), "
+        f"moved onto the converted audio")
+
+    if args.refine:
+        used = len({c.file_index for c in cues})
+        vbar = Progress(used, "snapping", tag=f"{C.TAG}[jisho-subs]{C.RESET} ")
+
+        def on_file(phase, audio):
+            if phase == "start":
+                vbar.note(audio.name)
+            else:
+                vbar.advance(audio.name, weight=audio.duration)
+
+        moved = refine(cues, files,
+                       cache_dir=args.cache_dir or default_cache_dir(),
+                       force=args.force, log=lambda m: vbar.note(m.strip()),
+                       on_file=on_file)
+        vbar.close(f"{sum(moved.values())} cue ends adjusted")
+
+    if args.dry_run:
+        log(f"  {C.WARN}dry run — nothing written{C.RESET}")
+        return True
+    wbar = Progress(len(files), "writing", tag=f"{C.TAG}[jisho-subs]{C.RESET} ")
+    stats = write_for_files(cues, files, args.out,
+                            log=lambda m: wbar.note(m.strip()),
+                            on_file=lambda name: wbar.advance(name))
+    wbar.close()
+    log(f"  {C.OK}{stats.files} SRT files rewritten, {stats.cues} cues{C.RESET}")
+    return True
+
+
 def _run_one_book(args, plan) -> bool:
     """The whole pipeline for one book.  Returns True if anything was done."""
     from .align import align
@@ -521,12 +599,14 @@ def _run_one_book(args, plan) -> bool:
         return False
     lang = _language_for(args, plan, files)
 
-    stale = _conversion_candidates(args, files) if args.convert else []
+    stale = _conversion_candidates(args, files) if args.do_convert else []
     if stale and args.dry_run:
         log(f"{C.WARN}dry run: not converting {len(stale)} MP3 file(s){C.RESET}")
         stale = []
     subtitles = plan.reference != FROM_NOTHING
-    step = Steps((1 if stale else 0) + (5 if subtitles else 0) or 1)
+    cheap = plan.reference == FROM_SRT and not args.realign
+    step = Steps((1 if stale else 0)
+                 + (1 if cheap else (5 if subtitles else 0)) or 1)
 
     if stale:
         already = len(files) - len(stale)
@@ -556,6 +636,10 @@ def _run_one_book(args, plan) -> bool:
         log(f"  {C.OK}✓ {len(files)} tracks are M4B; no book or subtitles here, "
             f"so nothing further{C.RESET}")
         return True
+
+    if plan.reference == FROM_SRT and not args.realign:
+        step("moving the existing subtitles onto the converted audio")
+        return _resync_from_srt(args, plan, files)
 
     dropped_docs: List[tuple] = []
     if plan.reference == FROM_EPUB:
@@ -759,94 +843,90 @@ def build_parser() -> argparse.ArgumentParser:
                     "SRT files for shiroikuma-jisho.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
-examples:
-  shiroikuma-jisho-subtitles -s                    # set up or check this machine
-  shiroikuma-jisho-subtitles ~/tmp/subtitles/1     # language read from the EPUB
-  shiroikuma-jisho-subtitles ~/books/L -d          # ...then delete the MP3s
-  shiroikuma-jisho-subtitles sentences ~/books/L   # just the reference text
-  shiroikuma-jisho-subtitles probe ~/books/L       # what would be used
-  shiroikuma-jisho-subtitles lint ~/books/L/audio  # check written SRTs
-
 The full manual, including what -d deletes and what protects you from it,
-is in the wrapper: shiroikuma-jisho-subtitles -h
+is in the wrapper:  shiroikuma-jisho-subtitles -h
+
+examples:
+  shiroikuma-jisho-subtitles ~/books/Lazar          # one book
+  shiroikuma-jisho-subtitles ~/audiobooks -n        # a library: show the plan
+  shiroikuma-jisho-subtitles ~/audiobooks -d        # ...and delete the MP3s
+  shiroikuma-jisho-subtitles -c ~/books/Lazar       # convert the audio only
+  shiroikuma-jisho-subtitles --lint ~/books/Lazar   # check the written SRTs
 """)
-    p.add_argument("--version", action="version", version=f"jisho-subs {__version__}")
+    p.add_argument("paths", nargs="*", metavar="PATH",
+                   help="a book directory, a directory of them, or (with "
+                        "--lint) SRT files")
+    p.add_argument("--version", action="version",
+                   version=f"shiroikuma-jisho-subtitles {__version__}")
 
-    common = argparse.ArgumentParser(add_help=False)
-    common.add_argument("directory", nargs="?",
-                        help="book directory holding the EPUB and the audio")
-    common.add_argument("--dir", dest="directory_opt",
-                        help="same as the positional argument")
-    common.add_argument("--epub",
-                        help="reference EPUB or PDF (overrides the directory)")
-    common.add_argument("--audio",
-                        help="directory of audio files (overrides the directory)")
-    common.add_argument("-l", "--lang",
-                        help="language code; read from the EPUB when omitted")
+    # What to do.  All options; there are no bare-word subcommands.
+    mode = p.add_argument_group("what to do (default: the whole pipeline)")
+    exclusive = mode.add_mutually_exclusive_group()
+    exclusive.add_argument("-c", "--convert", dest="convert_only",
+                           action="store_true",
+                           help="convert the audio to M4B and stop")
+    exclusive.add_argument("--sentences", action="store_true",
+                           help="print the reference text as it will be cued")
+    exclusive.add_argument("--probe", action="store_true",
+                           help="show what would be used, and do nothing")
+    exclusive.add_argument("--lint", action="store_true",
+                           help="check SRTs against the app's parser")
 
-    sub = p.add_subparsers(dest="command")
+    where = p.add_argument_group("what to work on")
+    where.add_argument("--dir", dest="directory_opt",
+                       help="same as giving the path positionally")
+    where.add_argument("--epub", help="use this EPUB or PDF as the reference")
+    where.add_argument("--audio", help="use this directory of audio files")
+    where.add_argument("-l", "--lang",
+                       help="language code; worked out from the book when omitted")
+    where.add_argument("-o", "--out",
+                       help="write the SRTs here instead of beside each audio file")
 
-    run = sub.add_parser("run", parents=[common], help="the full pipeline (default)")
-    run.add_argument("-o", "--out",
-                     help="where to write SRTs (default: beside each audio file, "
-                          "which is what makes the app pair them automatically)")
-    run.add_argument("--model", default="large-v3", help="Whisper model")
-    run.add_argument("--device", default="auto", choices=["auto", "cuda", "cpu"])
-    run.add_argument("--batch-size", type=int, default=32)
-    run.add_argument("--beam-size", type=int, default=1)
-    run.add_argument("--cache-dir")
-    run.add_argument("--no-refine", dest="refine", action="store_false",
-                     help="skip snapping cue ends into pauses")
-    run.add_argument("--keep-mp3", dest="convert", action="store_false",
-                     help="do not convert MP3 to M4B first (the app cannot seek "
-                          "MP3, so auto-pause will land on the wrong sentence)")
-    run.add_argument("--convert-to",
-                     help="where converted audio should go "
-                          "(default: beside the MP3 it came from)")
-    run.add_argument("--jobs", type=int, help="parallel conversions")
-    run.add_argument("--reencode", action="store_true",
-                     help="re-encode to AAC instead of copying the MP3 stream "
-                          "into the M4B losslessly")
-    run.add_argument("-d", "--delete-mp3", dest="delete_mp3", action="store_true",
-                     help="DESTRUCTIVE: delete each MP3 once its M4B is verified. "
-                          "Asks first unless -y is given.")
+    audio = p.add_argument_group("audio")
+    audio.add_argument("--keep-mp3", dest="do_convert", action="store_false",
+                       help="do not convert MP3 to M4B (the app cannot seek MP3, "
+                            "so auto-pause will land on the wrong sentence)")
+    audio.add_argument("--reencode", action="store_true",
+                       help="re-encode to AAC instead of copying the MP3 stream "
+                            "in losslessly")
+    audio.add_argument("--convert-to", metavar="DIR",
+                       help="put converted audio somewhere other than beside "
+                            "the MP3 it came from")
+    audio.add_argument("--jobs", type=int, metavar="N",
+                       help="parallel conversions")
+    audio.add_argument("-d", "--delete-mp3", dest="delete_mp3",
+                       action="store_true",
+                       help="DESTRUCTIVE: delete each MP3 once its M4B is "
+                            "verified. Asks once before anything is touched.")
+
+    subs = p.add_argument_group("subtitles")
+    subs.add_argument("--realign", action="store_true",
+                      help="when a folder has SRTs but no book, transcribe and "
+                           "align them again rather than shifting them onto the "
+                           "converted audio")
+    subs.add_argument("--no-refine", dest="refine", action="store_false",
+                      help="skip snapping cue ends into pauses")
+    subs.add_argument("--model", default="large-v3", help="Whisper model")
+    subs.add_argument("--device", default="auto",
+                      choices=["auto", "cuda", "cpu"])
+    subs.add_argument("--batch-size", type=int, default=32)
+    subs.add_argument("--beam-size", type=int, default=1)
+    subs.add_argument("--cache-dir", metavar="DIR")
+
+    run = p.add_argument_group("how to run")
+    run.add_argument("-n", "--dry-run", action="store_true",
+                     help="plan only: convert nothing, delete nothing, write nothing")
     run.add_argument("-y", "--yes", action="store_true",
                      help="skip the confirmation prompt")
     run.add_argument("--force", action="store_true",
-                     help="ignore cached transcripts and re-run ASR")
-    run.add_argument("-n", "--dry-run", action="store_true",
-                     help="plan only: convert nothing, delete nothing, write "
-                          "nothing")
-    run.add_argument("--report", help="write the run report to this file")
-    run.add_argument("--json", help="write a machine-readable report here")
+                     help="redo work that has already been done")
+    run.add_argument("--report", metavar="FILE", help="save the run report")
+    run.add_argument("--json", metavar="FILE",
+                     help="save a machine-readable report")
     run.add_argument("-v", "--verbose", action="store_true")
-    run.set_defaults(func=cmd_run, refine=True, convert=True)
 
-    sen = sub.add_parser("sentences", parents=[common],
-                         help="print the reference text as it will be cued")
-    sen.set_defaults(func=cmd_sentences)
-
-    pr = sub.add_parser("probe", parents=[common],
-                        help="show what would be used, without doing work")
-    pr.set_defaults(func=cmd_probe)
-
-    cv = sub.add_parser("convert", parents=[common],
-                        help="convert MP3 audio to M4B and stop")
-    cv.add_argument("--convert-to")
-    cv.add_argument("--jobs", type=int)
-    cv.add_argument("--force", action="store_true")
-    cv.add_argument("--reencode", action="store_true",
-                    help="re-encode to AAC instead of copying losslessly")
-    cv.add_argument("-d", "--delete-mp3", dest="delete_mp3", action="store_true",
-                    help="DESTRUCTIVE: delete each MP3 once its M4B is verified")
-    cv.add_argument("-y", "--yes", action="store_true",
-                    help="skip the confirmation prompt")
-    cv.set_defaults(func=cmd_convert)
-
-    ln = sub.add_parser("lint", help="check SRTs against the app's parser contract")
-    ln.add_argument("paths", nargs="+")
-    ln.set_defaults(func=cmd_lint)
-
+    p.set_defaults(refine=True, do_convert=True, convert_only=False,
+                   directory=None)
     return p
 
 
@@ -856,22 +936,30 @@ def main(argv: Optional[List[str]] = None) -> int:
         C.enable()
 
     parser = build_parser()
-    # A bare directory (or any option) means `run`.
-    known = {"run", "sentences", "probe", "lint", "convert"}
-    if argv and argv[0] not in known and not argv[0] in ("-h", "--help", "--version"):
-        argv.insert(0, "run")
     if not argv:
         parser.print_help()
         return 0
-
     args = parser.parse_args(argv)
-    if not getattr(args, "func", None):
-        parser.print_help()
-        return 0
-    if args.func is cmd_run:
-        ensure_library_path()
+
+    # A trailing slash is what tab-completion produces, and every path here is
+    # a directory; strip it so basenames and parsing behave.
+    args.paths = [p.rstrip(os.sep) or os.sep for p in args.paths]
+    if args.paths and not args.lint:
+        args.directory = args.paths[0]
+    if args.directory_opt and not args.directory:
+        args.directory = args.directory_opt
+
     try:
-        return args.func(args)
+        if args.lint:
+            return cmd_lint(args)
+        if args.sentences:
+            return cmd_sentences(args)
+        if args.probe:
+            return cmd_probe(args)
+        if args.convert_only:
+            return cmd_convert(args)
+        ensure_library_path()
+        return cmd_run(args)
     except KeyboardInterrupt:
         log("interrupted")
         return 130

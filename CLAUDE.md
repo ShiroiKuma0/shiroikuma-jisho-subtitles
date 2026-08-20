@@ -156,10 +156,14 @@ lists rather than probes — surveying the 127-book library would otherwise cost
 one ffprobe per file across 4,376 of them; as it stands the survey is instant.
 The full `discover()` runs only when a book is actually processed.
 
-**An SRT can be the reference text.** A folder of MP3s with subtitles has
-everything except a book: the cues *are* the sentences, so they go in where an
-EPUB's sentences would and the same alignment re-places them. Read every SRT
-before writing any, since they are rewritten in place.
+**A folder of SRTs is resynced, not re-aligned.** The remux is lossless — the
+decoded audio is bit-identical and only the origin moves, by the encoder delay
+(25 ms measured on Lázár) — so there is no drift to rediscover and transcribing
+hundreds of hours would produce nothing. `_resync_from_srt()` reads the existing
+cues, snaps them to the M4B's own pauses (absolute, so the offset corrects
+itself) and rewrites. `--realign` runs the full pipeline with the cues as the
+reference text, for an SRT that is actually wrong rather than merely moved.
+This is the difference between a one-hour library run and an eight-hour one.
 
 ## Architecture note
 

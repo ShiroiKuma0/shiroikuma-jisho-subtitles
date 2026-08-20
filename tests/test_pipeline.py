@@ -664,30 +664,35 @@ def test_every_option_is_documented_in_the_manual():
 
     man = subprocess.run(["bash", WRAPPER, "-h"], capture_output=True, text=True,
                          env={**os.environ, "NO_COLOR": "1"}).stdout
-    parser = build_parser()
-    subs = [a for a in parser._actions
-            if hasattr(a, "choices") and isinstance(a.choices, dict)][0]
     undocumented = []
-    for name, sub in subs.choices.items():
-        for action in sub._actions:
-            for flag in action.option_strings:
-                if flag in ("-h", "--help"):
-                    continue
-                if flag not in man:
-                    undocumented.append(f"{name} {flag}")
+    for action in build_parser()._actions:
+        for flag in action.option_strings:
+            if flag in ("-h", "--help"):
+                continue
+            if flag not in man:
+                undocumented.append(flag)
     assert not undocumented, f"not in `-h`: {undocumented}"
 
 
-def test_every_subcommand_is_documented_in_the_manual():
-    import subprocess
+def test_there_are_no_bare_word_subcommands():
+    """Every mode is an option; nothing is a positional verb."""
     from jisho_subs.cli import build_parser
 
-    man = subprocess.run(["bash", WRAPPER, "-h"], capture_output=True, text=True,
-                         env={**os.environ, "NO_COLOR": "1"}).stdout
     parser = build_parser()
-    subs = [a for a in parser._actions
-            if hasattr(a, "choices") and isinstance(a.choices, dict)][0]
-    assert not [n for n in subs.choices if n not in man]
+    for action in parser._actions:
+        assert not (hasattr(action, "choices")
+                    and isinstance(action.choices, dict)), \
+            "argparse subparsers are back"
+    # The only positional is the path itself.
+    positionals = [a.dest for a in parser._actions if not a.option_strings]
+    assert positionals == ["paths"], positionals
+
+
+def test_the_modes_are_mutually_exclusive():
+    import pytest as _pytest
+    from jisho_subs.cli import build_parser
+    with _pytest.raises(SystemExit):
+        build_parser().parse_args(["-c", "--probe", "/tmp"])
 
 
 def test_dash_n_is_dry_run():

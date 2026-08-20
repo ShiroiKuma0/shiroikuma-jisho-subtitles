@@ -31,7 +31,7 @@ It works out what a directory is rather than asking for a mode:
 | The directory holds | What happens |
 |---|---|
 | an EPUB and audio | the full pipeline |
-| MP3s **and SRTs** | converts the audio, re-aligns those cues against it, rewrites them in place — no book needed |
+| MP3s **and SRTs** | converts the audio, moves those cues onto it and re-snaps them to the pauses — **no transcription**, since the remux is lossless. `--realign` for a full re-alignment |
 | MP3s alone | converts the audio and stops |
 | **folders of the above** | surveys them all, shows the plan, asks once, then works through them |
 
