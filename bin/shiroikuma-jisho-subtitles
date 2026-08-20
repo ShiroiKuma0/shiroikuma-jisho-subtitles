@@ -8,7 +8,7 @@
 
 set -euo pipefail
 
-VENV="${JISHO_SUBS_VENV:-$HOME/jisho-subs-venv}"
+VENV="${JISHO_SUBS_VENV:-$HOME/venv.shiroikuma-jisho-subtitles}"
 REPO="${JISHO_SUBS_REPO:-$HOME/git/shiroikuma-jisho-subtitles}"
 PROG=$(basename "$0")
 

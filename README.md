@@ -55,8 +55,8 @@ text is the **book's own**, not the transcriber's.
 ## Install
 
 ```
-python3 -m venv ~/jisho-subs-venv
-~/jisho-subs-venv/bin/pip install -e '.[cuda]'
+python3 -m venv ~/venv.shiroikuma-jisho-subtitles
+~/venv.shiroikuma-jisho-subtitles/bin/pip install -e '.[cuda]'
 ln -s "$PWD/bin/shiroikuma-jisho-subtitles" ~/0/bin/
 ```
 

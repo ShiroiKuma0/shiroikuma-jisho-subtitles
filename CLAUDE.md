@@ -103,7 +103,7 @@ case the code guards against. Re-check against all five after touching
 
 ```
 shiroikuma-jisho-subtitles ~/tmp/subtitles/1        # ~/0/bin, wraps the venv
-~/jisho-subs-venv/bin/python -m pytest -q
+~/venv.shiroikuma-jisho-subtitles/bin/python -m pytest -q
 ```
 
 `bin/shiroikuma-jisho-subtitles` carries the full `-h`; keep it in step with the
