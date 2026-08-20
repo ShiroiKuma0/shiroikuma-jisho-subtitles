@@ -907,3 +907,50 @@ def test_retagging_reports_what_it_did():
     from jisho_subs.convert import retag
     result = retag([])
     assert result.made == [] and result.failed == []
+
+
+# -- guessing a language when nothing states it --------------------------
+
+def test_script_identifies_japanese_and_russian():
+    from jisho_subs.metadata import guess_language
+    assert guess_language(["第１章　青豆　見かけにだまされないように"]) == "ja"
+    assert guess_language(["День опричника", "Глава 1"]) == "ru"
+
+
+def test_kanji_without_kana_is_still_japanese():
+    from jisho_subs.metadata import guess_language
+    assert guess_language(["羅生門", "芥川龍之介"]) == "ja"
+
+
+def test_a_genre_tag_does_not_decide_the_language():
+    """白い熊 tags books with Japanese genre words, so the raw folder name of a
+    German book contains kanji."""
+    from jisho_subs.metadata import detect_language, parse_directory
+    info = parse_directory("Lázár, Nelio Biedermann -- [197] (2026) 小説")
+    assert detect_language(info, ["001_111_978.mp3"],
+                           [{"title": "Kapitel 1 - Lázár"}]) == "de"
+
+
+def test_publisher_boilerplate_does_not_decide_the_language():
+    """"Opening Credits" appears in the tags of German audiobooks too."""
+    from jisho_subs.metadata import guess_language
+    assert guess_language(["Also sprach Zarathustra", "Friedrich Nietzsche",
+                           "Opening Credits"]) == "de"
+
+
+def test_diacritics_shared_across_languages_prove_nothing():
+    """"Lázár" is a Hungarian name; á must not imply Czech."""
+    from jisho_subs.metadata import guess_language
+    assert guess_language(["Lázár", "Nelio Biedermann"]) != "cs"
+
+
+def test_no_evidence_means_no_guess():
+    from jisho_subs.metadata import guess_language
+    assert guess_language(["MMA"]) is None
+    assert guess_language([""]) is None
+
+
+def test_a_stated_language_always_wins():
+    from jisho_subs.metadata import detect_language, parse_directory
+    info = parse_directory("Empuzjon, Olga Tokarczuk -- [197][942] (2022)")
+    assert detect_language(info, ["第1章.mp3"], []) == "pl"

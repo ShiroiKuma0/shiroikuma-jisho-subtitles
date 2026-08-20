@@ -109,6 +109,15 @@ Cyrillic; without that it would mangle `Anéantir`, `Zoë Schiffer` and `Sněže
 Keep that check if you touch it, and keep the tests that assert those exact
 strings survive.
 
+**Language detection reads the *parsed* fields, never the raw folder name.**
+白い熊 tags books with Japanese genre words — 小説, 哲学, ルポルタージュ — so a
+German book's folder contains kanji, and feeding the raw name to the guesser
+labelled Lázár Japanese. `detect_language()` takes `info.book`/`info.author`
+plus filenames and existing tags. Two other traps are covered by tests: shared
+diacritics (`á` in "Lázár" is Hungarian, not Czech) and publisher boilerplate
+("Opening Credits" in a German book's tags). It returns None rather than guess
+on thin evidence — 111 of 127 books resolve, the rest stay `und`.
+
 **`und` cannot be removed, only replaced.** MP4's `mdhd` box carries a
 mandatory 16-bit packed language field; a file with no language reads `und`
 (0x55c4), and so do 白い熊's untouched publisher M4Bs. The answer is therefore

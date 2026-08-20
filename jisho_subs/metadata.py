@@ -54,6 +54,116 @@ _PUBLISHER_ID = re.compile(r'^[A-Z0-9_\-]{8,}$')
 _YEAR = re.compile(r'\((\d{3,4})(?:-\d\d-\d\d)?\)')
 
 
+#: Scripts that identify a language on sight.  Kana is decisive for Japanese —
+#: kanji alone is not, since it is shared with Chinese.
+_SCRIPTS = (
+    ('ja', re.compile(r'[぀-ゟ゠-ヿ]')),          # hiragana, katakana
+    ('ru', re.compile(r'[Ѐ-ӿ]')),                    # Cyrillic
+)
+
+_KANJI = re.compile(r'[一-鿿]')
+
+#: Letters diagnostic *within this set of languages*.  Deliberately excludes
+#: the widely shared ones — á, í, é, ó turn up in Hungarian, Spanish and
+#: Portuguese names, and "Lázár" in a German book was enough to make the whole
+#: thing guess Czech.
+_DIACRITICS = {
+    'pl': set('ąćęłńśźż'),
+    'cs': set('ěřůďťňšžč'),
+    'de': set('äöüß'),
+}
+
+#: Short, very common words.  Only used to break a tie or to catch a language
+#: written without diacritics — "Also sprach Zarathustra" has none at all.
+_WORDS = {
+    # No word that is also ordinary English — "die", "man", "was", "wie" all
+    # occur in English titles and would drag them into German.
+    'de': {'der', 'das', 'und', 'von', 'ein', 'eine', 'nicht', 'sprach',
+           'für', 'über', 'zur', 'zum', 'mit', 'auf', 'aus', 'kapitel',
+           'jenseits', 'böse', 'geschwister', 'vorrede', 'erstes', 'zweites',
+           'drittes', 'wird', 'seele', 'menschen'},
+    # No publisher boilerplate.  "Opening Credits", "Chapter", "Part" and
+    # "Book" appear in the tags of German and Japanese audiobooks too, and were
+    # enough to label them English.
+    'en': {'the', 'and', 'of', 'to', 'in', 'on', 'for', 'with', 'that',
+           'his', 'her', 'from', 'about', 'how', 'why', 'what'},
+    'pl': {'i', 'w', 'na', 'przez', 'swój', 'nie', 'się', 'jest', 'rozdział'},
+    'cs': {'na', 'se', 'je', 'kapitola', 'který', 'díl', 'část', 'povídka',
+           'porodní', 'obhajoba'},
+    'ru': {'и', 'в', 'на', 'не', 'что', 'глава', 'часть', 'том'},
+    'ja': {'章', '巻', '第', '編', '話'},
+}
+
+
+def guess_language(texts) -> Optional[str]:
+    """Best guess at a language from names and tags, or None.
+
+    Used only when nothing states the language outright.  MP4 must record
+    *something* in its language field, so the choice is between a reasoned guess
+    and `und`; a guess is worth making, but a wrong one is worse than none, so
+    this returns None unless the evidence is clear.
+
+    Order matters.  Script is decisive where it exists — kana can only be
+    Japanese, Cyrillic only Russian here.  Failing that, letters unique to one
+    language, then common short words for a language written without any
+    (German titles frequently carry no umlaut at all).
+    """
+    blob = ' '.join(t for t in texts if t)
+    if not blob.strip():
+        return None
+    lowered = blob.lower()
+
+    for language, pattern in _SCRIPTS:
+        if pattern.search(blob):
+            return language
+
+    scores = {}
+    # Kanji without kana is weaker evidence than kana — the script is shared
+    # with Chinese — but within this library it means Japanese.
+    if _KANJI.search(blob):
+        scores['ja'] = scores.get('ja', 0) + 2
+    for language, letters in _DIACRITICS.items():
+        hits = sum(lowered.count(c) for c in letters)
+        if hits:
+            scores[language] = scores.get(language, 0) + hits * 3
+
+    words = set(re.findall(r"[^\W\d_]+", lowered, re.UNICODE))
+    for language, vocabulary in _WORDS.items():
+        hits = len(words & vocabulary)
+        if hits:
+            scores[language] = scores.get(language, 0) + hits
+
+    if not scores:
+        return None
+    best, score = max(scores.items(), key=lambda kv: kv[1])
+    runner_up = max((v for k, v in scores.items() if k != best), default=0)
+    if score <= runner_up:
+        return None                    # a tie is not evidence
+    # One unmistakable word is enough when nothing competes; two are needed
+    # when something does.
+    if score >= 2 or runner_up == 0:
+        return best
+    return None
+
+
+def detect_language(info: 'BookInfo', filenames=(), tags=()) -> Optional[str]:
+    """Work out a book's language from what is around it.
+
+    Feeds the guesser the *parsed* title and author rather than the raw folder
+    name.  That matters here: 白い熊 tags books with Japanese genre words —
+    「小説」, 「哲学」, 「ルポルタージュ」 — so the raw name of a German book
+    contains kanji, and using it directly labelled Lázár Japanese.
+    """
+    if info.language:
+        return info.language
+    texts = [info.book, info.author, info.narrator]
+    texts += list(filenames)
+    for tag in tags:
+        if isinstance(tag, dict):
+            texts += [tag.get(k) for k in ('title', 'album', 'artist', 'comment')]
+    return guess_language([demojibake(t) for t in texts if t])
+
+
 def demojibake(text: Optional[str]) -> Optional[str]:
     """Undo CP1251 tag bytes that were decoded as Latin-1.
 

@@ -28,7 +28,8 @@ from dataclasses import dataclass
 from typing import List, Optional, Sequence
 
 from .audio import SEEK_ACCURATE, AudioFile, natural_key, probe, read_tags
-from .metadata import BookInfo, build_tags, parse_directory
+from .metadata import (BookInfo, build_tags, detect_language,
+                       parse_directory)
 
 #: Fallback AAC bitrate when the source's own rate cannot be read.
 DEFAULT_BITRATE = 128
@@ -70,6 +71,19 @@ def target_dir(files: Sequence[AudioFile]) -> str:
     ``audio.prefer_seekable``).
     """
     return os.path.dirname(os.path.abspath(files[0].path))
+
+
+def _sniff_language(info: BookInfo, files: Sequence[AudioFile]) -> Optional[str]:
+    """Guess the language when nothing states it, from names and existing tags.
+
+    MP4 must record something in its language field, so the alternative to a
+    reasoned guess is `und`.  A few files are enough of a sample.
+    """
+    if info.language:
+        return info.language
+    sample = list(files[:3])
+    return detect_language(info, [f.name for f in sample],
+                           [read_tags(f.path) for f in sample])
 
 
 def _target_bitrate(source: AudioFile) -> int:
@@ -196,6 +210,7 @@ def convert(files: Sequence[AudioFile], out_dir: Optional[str] = None,
     # language; the per-file tags are not.
     info = parse_directory(os.path.dirname(os.path.abspath(todo[0].path))) \
         .with_language(language)
+    info = info.with_language(_sniff_language(info, todo))
 
     made: List[str] = []
     skipped: List[str] = []
@@ -305,6 +320,7 @@ def retag(files: Sequence[AudioFile], out_dir: Optional[str] = None,
         return ConvertResult([], [], [], out_dir or "", None, [], [], {}, 0)
     out_dir = out_dir or os.path.dirname(os.path.abspath(files[0].path))
     info = parse_directory(out_dir).with_language(language)
+    info = info.with_language(_sniff_language(info, files))
 
     made: List[str] = []
     failed: List[tuple] = []
