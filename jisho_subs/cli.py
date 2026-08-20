@@ -470,18 +470,18 @@ def cmd_run(args) -> int:
 
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
-        prog="jisho-subs",
+        prog="shiroikuma-jisho-subtitles",
         description="Turn an EPUB and its audiobook into one-sentence-per-cue "
                     "SRT files for shiroikuma-jisho.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 examples:
-  jisho-subs ~/tmp/subtitles/1              # language read from the EPUB
-  jisho-subs ~/books/Lazar -d               # ...then delete the MP3s (asks)
-  jisho-subs ~/books/Lazar -d -y            # ...without asking
-  jisho-subs sentences ~/books/Lazar        # just the reference text
-  jisho-subs probe ~/books/Lazar            # what would be used
-  jisho-subs lint ~/books/Lazar/audio       # check written SRTs
+  shiroikuma-jisho-subtitles -s                    # set up or check this machine
+  shiroikuma-jisho-subtitles ~/tmp/subtitles/1     # language read from the EPUB
+  shiroikuma-jisho-subtitles ~/books/L -d          # ...then delete the MP3s
+  shiroikuma-jisho-subtitles sentences ~/books/L   # just the reference text
+  shiroikuma-jisho-subtitles probe ~/books/L       # what would be used
+  shiroikuma-jisho-subtitles lint ~/books/L/audio  # check written SRTs
 
 The full manual, including what -d deletes and what protects you from it,
 is in the wrapper: shiroikuma-jisho-subtitles -h

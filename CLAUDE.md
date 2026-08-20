@@ -109,6 +109,13 @@ shiroikuma-jisho-subtitles ~/tmp/subtitles/1        # ~/0/bin, wraps the venv
 `bin/shiroikuma-jisho-subtitles` carries the full `-h`; keep it in step with the
 argparse options when adding flags.
 
+`-s` (setup/verify) lives in the wrapper rather than in argparse because it has
+to run on a machine with no virtualenv — it cannot go through the venv's Python.
+Two bash traps to respect there: the file runs under `set -e`, so every bare
+conditional used for its side effect needs `|| true`; and `$?` inside an
+`if ! cmd; then` branch is the negation's status, not the command's, which once
+made a broken environment report itself ready.
+
 Transcripts and VAD results cache in `~/.cache/jisho-subs`; runs after the first
 skip the GPU work entirely. Use `--force` to re-transcribe.
 

@@ -582,3 +582,36 @@ def test_already_converted_mp3s_are_still_deletable_on_a_later_run(tmp_path):
     assert len(deleted) == 2 and kept == []
     assert not list(tmp_path.glob("*.mp3"))
     assert len(list(tmp_path.glob("*.m4b"))) == 2
+
+
+# -- the wrapper script --------------------------------------------------
+
+WRAPPER = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                       "bin", "shiroikuma-jisho-subtitles")
+
+
+def test_the_wrapper_is_valid_bash():
+    import subprocess
+    assert subprocess.run(["bash", "-n", WRAPPER]).returncode == 0
+
+
+def test_the_wrapper_help_documents_every_mode():
+    import subprocess
+    out = subprocess.run(["bash", WRAPPER, "-h"], capture_output=True, text=True,
+                         env={**os.environ, "NO_COLOR": "1"}).stdout
+    for expected in ("SETTING UP A MACHINE", "DELETING THE MP3s",
+                     "MP3 CONVERSION", "-s", "-d, --delete-mp3", "--rebuild",
+                     "WHAT IT DOES, IN ORDER", "CACHING"):
+        assert expected in out, f"the manual no longer mentions {expected!r}"
+
+
+def test_the_wrapper_reports_a_missing_venv_rather_than_crashing(tmp_path):
+    """Pointed at a path with no venv, `run` must explain, not traceback."""
+    import subprocess
+    r = subprocess.run(["bash", WRAPPER, "probe", str(tmp_path)],
+                       capture_output=True, text=True,
+                       env={**os.environ, "NO_COLOR": "1",
+                            "JISHO_SUBS_VENV": str(tmp_path / "absent")})
+    assert r.returncode != 0
+    assert "no interpreter" in r.stderr
+    assert "-m venv" in r.stderr, "it should say how to create one"

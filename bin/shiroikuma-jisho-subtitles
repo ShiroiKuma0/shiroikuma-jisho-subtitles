@@ -32,6 +32,9 @@ ${C}SYNOPSIS${R}
     ${PROG} ${C}probe${R}     ${C}BOOKDIR${R}     show what would be used, do nothing
     ${PROG} ${C}lint${R}      ${C}AUDIODIR${R}    check SRTs against the app's parser
 
+    ${PROG} ${C}-s${R}                     set up, or check, this machine
+    ${PROG} ${C}-s --rebuild${R}           throw the environment away and rebuild it
+
     ${C}BOOKDIR${R} is positional; ${C}--dir${R} ${C}BOOKDIR${R} is accepted too.  ${B}Note that -d
     means delete${R} — see DELETING THE MP3s.
 
@@ -203,6 +206,25 @@ ${C}EXAMPLES${R}
     ${D}# Check what the app will make of the result.${R}
     ${PROG} lint ~/books/Lázár/audio
 
+${C}SETTING UP A MACHINE${R}  ${C}(-s)${R}
+    ${C}${PROG} -s${R} makes a fresh Debian, Ubuntu or Tuxedo OS
+    machine ready in one step, and on a machine that is already ready it just
+    reports what it finds.
+
+    ${B}When nothing is installed${R} it works out what is missing, installs the
+    system packages through apt (asking for sudo only if something is actually
+    needed), creates the virtualenv, installs this package into it in editable
+    mode, and then verifies the result.
+
+    ${B}When the environment already exists${R} it changes nothing.  It lists every
+    component — system tools, the interpreter, each Python dependency, the GPU
+    stack, the cached speech models — with a green check against each, and ends
+    by saying whether the machine is ready.
+
+    ${C}--rebuild${R} deletes the virtualenv and builds it again from scratch.  Only
+    the virtualenv: your books, your subtitles and the transcript cache are
+    never touched.
+
 ${C}REQUIREMENTS${R}
     ffmpeg and ffprobe on PATH.  A CUDA GPU is optional but turns hours into
     minutes.  The Python package lives in ${D}${VENV}${R}
@@ -216,10 +238,284 @@ ${C}SEE ALSO${R}
 EOF
 }
 
+# ---------------------------------------------------------------- setup ----
+# Everything below runs *without* the virtualenv, because its whole job may be
+# to create one.  Only bash, coreutils and whatever the base system ships.
+
+SETUP_FAIL=0
+SETUP_WARN=0
+
+ok()   { printf '  %s✓%s %-22s %s\n' "$G" "$R" "$1" "${2:-}"; }
+warn() { printf '  %s!%s %-22s %s\n' "$Y" "$R" "$1" "${2:-}"; SETUP_WARN=$((SETUP_WARN+1)); }
+bad()  { printf '  %s✗%s %-22s %s\n' "$E" "$R" "$1" "${2:-}"; SETUP_FAIL=$((SETUP_FAIL+1)); }
+sect() { printf '\n%s%s%s\n' "$C" "$1" "$R"; }
+
+# Debian package names, and the test that says whether each is really usable.
+apt_missing() {
+    local missing=()
+    command -v python3  >/dev/null 2>&1 || missing+=(python3)
+    python3 -c 'import venv'   >/dev/null 2>&1 || missing+=(python3-venv)
+    python3 -c 'import ensurepip' >/dev/null 2>&1 || missing+=(python3-venv)
+    command -v ffmpeg   >/dev/null 2>&1 || missing+=(ffmpeg)
+    command -v ffprobe  >/dev/null 2>&1 || missing+=(ffmpeg)
+    printf '%s\n' "${missing[@]:-}" | awk 'NF' | sort -u
+}
+
+install_apt() {
+    local pkgs=("$@")
+    [[ ${#pkgs[@]} -eq 0 ]] && return 0
+    command -v apt-get >/dev/null 2>&1 || {
+        bad "apt-get" "not found — install manually: ${pkgs[*]}"
+        return 1
+    }
+    printf '  %sinstalling:%s %s\n' "$Y" "$R" "${pkgs[*]}"
+    local sudo_cmd=()
+    if [[ $EUID -ne 0 ]]; then
+        command -v sudo >/dev/null 2>&1 || { bad "sudo" "needed for apt"; return 1; }
+        sudo_cmd=(sudo)
+        printf '  %s(sudo will ask for your password)%s\n' "$D" "$R"
+    fi
+    "${sudo_cmd[@]}" apt-get update -qq                 || return 1
+    "${sudo_cmd[@]}" apt-get install -y -qq "${pkgs[@]}" || return 1
+    return 0
+}
+
+build_venv() {
+    printf '  %screating%s %s\n' "$Y" "$R" "$VENV"
+    python3 -m venv "$VENV" || { bad "venv" "python3 -m venv failed"; return 1; }
+    printf '  %supgrading pip%s\n' "$D" "$R"
+    "$VENV/bin/python" -m pip install --quiet --upgrade pip setuptools wheel \
+        || { bad "pip" "could not upgrade"; return 1; }
+    printf '  %sinstalling %s (editable, with the CUDA extra)%s\n' "$D" "$REPO" "$R"
+    # Quoted: the extras bracket must not be read as a glob.
+    "$VENV/bin/python" -m pip install --quiet -e "$REPO[cuda,dev]" \
+        || { bad "pip install" "failed for $REPO"; return 1; }
+    return 0
+}
+
+report_system() {
+    sect "SYSTEM"
+    if command -v python3 >/dev/null 2>&1; then
+        ok "python3" "$(python3 -c 'import sys;print(".".join(map(str,sys.version_info[:3])))')"
+    else
+        bad "python3" "missing"
+    fi
+    python3 -c 'import venv' >/dev/null 2>&1 \
+        && ok "python3-venv" "available" || bad "python3-venv" "missing"
+    if command -v ffmpeg >/dev/null 2>&1; then
+        ok "ffmpeg" "$(ffmpeg -version 2>/dev/null | head -1 | awk '{print $3}')"
+    else
+        bad "ffmpeg" "missing"
+    fi
+    command -v ffprobe >/dev/null 2>&1 \
+        && ok "ffprobe" "$(ffprobe -version 2>/dev/null | head -1 | awk '{print $3}')" \
+        || bad "ffprobe" "missing"
+    if [[ -r /etc/os-release ]]; then
+        ok "os" "$(. /etc/os-release; echo "${PRETTY_NAME:-unknown}")"
+    fi
+    ok "cores" "$(nproc 2>/dev/null || echo '?')"
+}
+
+report_gpu() {
+    sect "GPU  ${D}(optional — the CPU path works, just slower)${R}"
+    if ! command -v nvidia-smi >/dev/null 2>&1; then
+        warn "nvidia-smi" "not present; transcription will use the CPU"
+        return
+    fi
+    local out
+    if ! out=$(nvidia-smi --query-gpu=name,driver_version --format=csv,noheader 2>&1); then
+        warn "nvidia driver" "$(printf '%s' "$out" | head -1)"
+        return
+    fi
+    ok "gpu" "$(printf '%s' "$out" | head -1)"
+    local n
+    n=$("$VENV/bin/python" -c 'import ctranslate2;print(ctranslate2.get_cuda_device_count())' 2>/dev/null || echo 0)
+    if [[ "$n" =~ ^[0-9]+$ ]] && (( n > 0 )); then
+        ok "ctranslate2 cuda" "$n device(s) visible"
+    else
+        warn "ctranslate2 cuda" "no device visible; will fall back to the CPU"
+    fi
+}
+
+report_packages() {
+    sect "PYTHON ENVIRONMENT"
+    if [[ ! -x "$VENV/bin/python" ]]; then
+        bad "virtualenv" "$VENV missing"
+        return
+    fi
+    ok "virtualenv" "$VENV"
+    ok "interpreter" "$("$VENV/bin/python" -c 'import sys;print(".".join(map(str,sys.version_info[:3])))')"
+    # Status captured explicitly: inside `if ! cmd`, $? is the negation's
+    # result, not the interpreter's, which would silently report a broken
+    # environment as ready.
+    local rc=0
+    set +e
+    "$VENV/bin/python" - <<'PY'
+import importlib.metadata as md
+import importlib.util, os, sys
+
+GREEN, RED, RESET, DIM = "\033[1;32m", "\033[1;31m", "\033[0m", "\033[2m"
+if os.environ.get("NO_COLOR") or not sys.stderr.isatty():
+    GREEN = RED = RESET = DIM = ""
+
+REQUIRED = [
+    ("jisho_subs",     "jisho-subs"),
+    ("faster_whisper", "faster-whisper"),
+    ("ctranslate2",    "ctranslate2"),
+    ("rapidfuzz",      "RapidFuzz"),
+    ("pysbd",          "pysbd"),
+    ("num2words",      "num2words"),
+    ("bs4",            "beautifulsoup4"),
+    ("lxml",           "lxml"),
+    ("numpy",          "numpy"),
+]
+OPTIONAL = [("nvidia.cublas", "nvidia-cublas-cu12"),
+            ("nvidia.cudnn",  "nvidia-cudnn-cu12"),
+            ("pytest",        "pytest")]
+
+bad = 0
+def line(mod, dist, required):
+    global bad
+    try:
+        version = md.version(dist)
+    except md.PackageNotFoundError:
+        version = None
+    found = importlib.util.find_spec(mod) is not None
+    if found and version:
+        print("  %s✓%s %-22s %s" % (GREEN, RESET, dist, version))
+    elif found:
+        print("  %s✓%s %-22s %spresent%s" % (GREEN, RESET, dist, DIM, RESET))
+    elif required:
+        print("  %s✗%s %-22s missing" % (RED, RESET, dist)); bad += 1
+    else:
+        print("  %s✗%s %-22s %smissing (optional)%s" % (RED, RESET, dist, DIM, RESET))
+
+for mod, dist in REQUIRED:
+    line(mod, dist, True)
+for mod, dist in OPTIONAL:
+    line(mod, dist, False)
+
+try:
+    import jisho_subs
+    print("  %s✓%s %-22s %s" % (GREEN, RESET, "editable checkout",
+                                os.path.dirname(os.path.dirname(jisho_subs.__file__))))
+except Exception:
+    pass
+# Exit status carries the count, so the shell can total it honestly.
+sys.exit(min(bad, 120))
+PY
+    rc=$?
+    set -e
+    # The exit status is the number of required packages that were missing.
+    SETUP_FAIL=$((SETUP_FAIL + rc))
+}
+
+report_models() {
+    sect "SPEECH MODELS  ${D}(downloaded on first use)${R}"
+    local hub="${HF_HOME:-$HOME/.cache/huggingface}/hub"
+    if [[ -d "$hub" ]]; then
+        local found=0
+        for d in "$hub"/models--Systran--faster-whisper-*; do
+            [[ -e "$d" ]] || continue
+            found=1
+            ok "$(basename "$d" | sed 's/models--Systran--faster-whisper-/whisper /')" \
+               "$(du -sh "$d" 2>/dev/null | cut -f1)"
+        done
+        if (( ! found )); then
+            warn "whisper models" "none cached yet; the first run downloads one"
+        fi
+    else
+        warn "whisper models" "none cached yet; the first run downloads one"
+    fi
+    local cache="${XDG_CACHE_HOME:-$HOME/.cache}/jisho-subs"
+    if [[ -d "$cache" ]]; then
+        ok "transcript cache" "$(find "$cache" -name '*.json' 2>/dev/null | wc -l) entries, $(du -sh "$cache" 2>/dev/null | cut -f1)"
+    else
+        ok "transcript cache" "empty (created on first run)"
+    fi
+}
+
+do_setup() {
+    local rebuild=${1:-0}
+    printf '%s%s%s — environment setup\n' "$Y" "$PROG" "$R"
+
+    if (( rebuild )) && [[ -d "$VENV" ]]; then
+        sect "REBUILD"
+        printf '  %sremoving%s %s\n' "$Y" "$R" "$VENV"
+        rm -rf "$VENV"
+    fi
+
+    local existed=0
+    [[ -x "$VENV/bin/python" ]] && existed=1 || true
+
+    if (( ! existed )); then
+        sect "INSTALLING SYSTEM PACKAGES"
+        local missing
+        mapfile -t missing < <(apt_missing)
+        if [[ ${#missing[@]} -eq 0 ]]; then
+            ok "system packages" "already present"
+        else
+            install_apt "${missing[@]}" || {
+                printf '\n%sSetup could not install the system packages.%s\n' "$E" "$R"
+                return 1
+            }
+            ok "system packages" "installed"
+        fi
+
+        sect "BUILDING THE VIRTUALENV"
+        build_venv || {
+            printf '\n%sSetup failed while building the virtualenv.%s\n' "$E" "$R"
+            return 1
+        }
+        ok "virtualenv" "built"
+    fi
+
+    report_system
+    report_packages
+    report_gpu
+    report_models
+
+    sect "TOOL"
+    if [[ -x "$VENV/bin/python" ]] && "$VENV/bin/python" -m jisho_subs --version >/dev/null 2>&1; then
+        ok "version" "$("$VENV/bin/python" -m jisho_subs --version 2>&1 | awk '{print $NF}')"
+        ok "repository" "$REPO"
+    else
+        bad "the tool" "does not run"
+    fi
+    if [[ -L "$HOME/0/bin/$PROG" || -x "$HOME/0/bin/$PROG" ]]; then
+        ok "on PATH" "~/0/bin/$PROG"
+    else
+        warn "on PATH" "not linked; ln -s $REPO/bin/$PROG ~/0/bin/"
+    fi
+
+    printf '\n'
+    if (( SETUP_FAIL )); then
+        printf '%s  ✗ %d problem(s) — not ready.%s  Re-run with --rebuild to start over.\n' \
+            "$E" "$SETUP_FAIL" "$R"
+        return 1
+    fi
+    if (( existed )); then
+        printf '%s  ✓ Everything is present. Ready to go.%s' "$G" "$R"
+    else
+        printf '%s  ✓ Setup complete. Ready to go.%s' "$G" "$R"
+    fi
+    if (( SETUP_WARN )); then
+        printf '  %s(%d optional item(s) missing)%s' "$D" "$SETUP_WARN" "$R"
+    fi
+    printf '\n\n  Try it:  %s%s BOOKDIR%s\n' "$C" "$PROG" "$R"
+    return 0
+}
+
 case "${1:-}" in
     -h|--help|help|"")
         print_help
         exit 0
+        ;;
+    -s|--setup)
+        rebuild=0
+        [[ "${2:-}" == "--rebuild" || "${2:-}" == "-r" ]] && rebuild=1
+        do_setup "$rebuild"
+        exit $?
         ;;
 esac
 

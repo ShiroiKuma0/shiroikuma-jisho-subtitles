@@ -55,10 +55,18 @@ text is the **book's own**, not the transcriber's.
 ## Install
 
 ```
-python3 -m venv ~/venv.shiroikuma-jisho-subtitles
-~/venv.shiroikuma-jisho-subtitles/bin/pip install -e '.[cuda]'
-ln -s "$PWD/bin/shiroikuma-jisho-subtitles" ~/0/bin/
+git clone git@github.com:ShiroiKuma0/shiroikuma-jisho-subtitles.git
+ln -s "$PWD/shiroikuma-jisho-subtitles/bin/shiroikuma-jisho-subtitles" ~/0/bin/
+shiroikuma-jisho-subtitles -s
 ```
+
+`-s` does the rest on a fresh Debian, Ubuntu or Tuxedo OS machine: works out
+which system packages are missing and installs them through apt, builds the
+virtualenv, installs this package into it, then verifies the result. Run on a
+machine that is already set up it changes nothing and simply reports what it
+finds, component by component, ending with whether the machine is ready.
+`-s --rebuild` throws the virtualenv away and builds it again — only the
+virtualenv; books, subtitles and the transcript cache are never touched.
 
 `shiroikuma-jisho-subtitles -h` documents the whole pipeline and every option.
 
