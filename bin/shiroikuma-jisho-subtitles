@@ -26,11 +26,14 @@ cat <<EOF
 ${Y}${PROG}${R} — sentence-aligned subtitles from an EPUB and its audiobook
 
 ${C}SYNOPSIS${R}
-    ${PROG} ${C}[run]${R} -d ${C}BOOKDIR${R} [options]
-    ${PROG} ${C}convert${R}   -d ${C}BOOKDIR${R}     convert MP3 to M4B, then stop
-    ${PROG} ${C}sentences${R} -d ${C}BOOKDIR${R}     print the text as it will be cued
-    ${PROG} ${C}probe${R}     -d ${C}BOOKDIR${R}     show what would be used, do nothing
-    ${PROG} ${C}lint${R}      ${C}AUDIODIR${R}       check SRTs against the app's parser
+    ${PROG} ${C}[run]${R} ${C}BOOKDIR${R} [options]
+    ${PROG} ${C}convert${R}   ${C}BOOKDIR${R}     convert MP3 to M4B, then stop
+    ${PROG} ${C}sentences${R} ${C}BOOKDIR${R}     print the text as it will be cued
+    ${PROG} ${C}probe${R}     ${C}BOOKDIR${R}     show what would be used, do nothing
+    ${PROG} ${C}lint${R}      ${C}AUDIODIR${R}    check SRTs against the app's parser
+
+    ${C}BOOKDIR${R} is positional; ${C}--dir${R} ${C}BOOKDIR${R} is accepted too.  ${B}Note that -d
+    means delete${R} — see DELETING THE MP3s.
 
 ${C}WHAT IT IS FOR${R}
     In shiroikuma-jisho you open a foreign-language EPUB, a translation EPUB,
@@ -113,14 +116,37 @@ ${C}MP3 CONVERSION${R}
 
     Pass ${C}--keep-mp3${R} to skip conversion entirely.
 
+${C}DELETING THE MP3s${R}  ${E}(-d, destructive)${R}
+    By default the MP3s are kept, so one folder ends up holding both copies of
+    every track.  The tool itself ignores the MP3s once M4Bs exist, but ${B}the app
+    does not${R} — it lists every audio file in a folder, so its chapter list will
+    show each track twice until the MP3s go.
+
+    ${C}-d${R} deletes them, once conversion has finished:
+
+      ${D}·${R} each MP3 is removed only after ${B}its own${R} M4B has been verified — the
+        file must probe as real audio and be the same length, so a truncated
+        or half-written conversion can never take the original with it
+      ${D}·${R} any MP3 whose replacement fails that check is ${B}kept${R}, and the reason
+        is printed
+      ${D}·${R} you are asked first, and a bare Enter means ${B}no${R}.  ${C}-y${R} skips the
+        prompt for unattended runs.
+
+    ${M}This is irreversible.${R}  Nothing else in this tool deletes anything, ever;
+    generated SRTs are overwritten in place on a re-run, but no audio is
+    touched unless you pass -d.
+
 ${C}OPTIONS FOR ${B}run${R}
-    ${C}-d, --dir${R} DIR       book directory holding the EPUB and the audio
+    ${C}BOOKDIR${R}             book directory holding the EPUB and the audio
+    ${C}--dir${R} DIR           the same thing, named
     ${C}--epub${R} FILE         reference EPUB or PDF (overrides -d)
     ${C}--audio${R} DIR         directory of audio files (overrides -d)
     ${C}-l, --lang${R} CODE     de, ja, pl, ru, …  read from the EPUB when omitted
     ${C}-o, --out${R} DIR       where SRTs go (default: beside each audio file,
                        which is what makes the app pair them automatically)
     ${C}--keep-mp3${R}          do not convert MP3 to M4B
+    ${C}-d, --delete-mp3${R}    ${E}DESTRUCTIVE${R}: delete each MP3 once its M4B verifies
+    ${C}-y, --yes${R}           skip the confirmation prompt that -d raises
     ${C}--convert-to${R} DIR    put converted audio somewhere else
     ${C}--jobs${R} N            parallel conversions
     ${C}--model${R} NAME        Whisper model (default: large-v3)
@@ -157,16 +183,22 @@ ${C}PERFORMANCE${R}
 
 ${C}EXAMPLES${R}
     ${D}# Everything: convert if needed, transcribe, align, write.${R}
-    ${PROG} -d ~/books/Lázár
+    ${PROG} ~/books/Lázár
+
+    ${D}# Same, then delete the MP3s once each M4B checks out (asks first).${R}
+    ${PROG} ~/books/Lázár -d
+
+    ${D}# Unattended: convert, delete the MP3s, no prompt.${R}
+    ${PROG} ~/books/Lázár -d -y
 
     ${D}# Language is read from the EPUB; state it only to override.${R}
-    ${PROG} -d ~/books/Lázár -l de --report ~/tmp/lazar.txt
+    ${PROG} ~/books/Lázár -l de --report ~/tmp/lazar.txt
 
     ${D}# See how the book will be cut into cues, before touching any audio.${R}
-    ${PROG} sentences -d ~/books/Lázár | less
+    ${PROG} sentences ~/books/Lázár | less
 
-    ${D}# Just fix the audio format.${R}
-    ${PROG} convert -d ~/books/Lázár
+    ${D}# Just fix the audio format, keeping the MP3s.${R}
+    ${PROG} convert ~/books/Lázár
 
     ${D}# Check what the app will make of the result.${R}
     ${PROG} lint ~/books/Lázár/audio

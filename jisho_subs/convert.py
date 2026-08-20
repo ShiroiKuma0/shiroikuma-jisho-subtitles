@@ -127,3 +127,44 @@ def converted_files(out_dir: str) -> List[AudioFile]:
 
 def have_ffmpeg() -> bool:
     return shutil.which("ffmpeg") is not None
+
+
+def verify_replacement(source: AudioFile, replacement: str,
+                       tolerance: float = 0.02) -> Optional[str]:
+    """Confirm an M4B really stands in for its MP3 before the MP3 is deleted.
+
+    Deleting audio is irreversible, so "the file exists" is not enough: the
+    replacement has to probe as real audio of the same length.  A truncated or
+    half-written conversion would otherwise take the original with it.
+    """
+    if not os.path.exists(replacement) or os.path.getsize(replacement) == 0:
+        return "the converted file is missing or empty"
+    info = probe(replacement)
+    if info is None:
+        return "the converted file does not probe as audio"
+    if source.duration > 0:
+        drift = abs(info.duration - source.duration)
+        if drift > max(1.0, source.duration * tolerance):
+            return (f"length differs by {drift:.1f}s "
+                    f"({source.duration:.0f}s vs {info.duration:.0f}s)")
+    return None
+
+
+def delete_sources(files: Sequence[AudioFile], out_dir: str,
+                   log=None) -> tuple:
+    """Delete each MP3 whose M4B is verified good.  Returns (deleted, kept)."""
+    deleted, kept = [], []
+    for f in files:
+        replacement = os.path.join(out_dir, f.stem + ".m4b")
+        problem = verify_replacement(f, replacement)
+        if problem:
+            kept.append((f.name, problem))
+            if log:
+                log(f"  keeping {f.name}: {problem}")
+            continue
+        try:
+            os.unlink(f.path)
+            deleted.append(f.name)
+        except OSError as exc:
+            kept.append((f.name, str(exc)))
+    return deleted, kept

@@ -4,7 +4,7 @@ Turn an EPUB and its audiobook into **one-sentence-per-cue SRT files** for
 [shiroikuma-jisho](https://github.com/shiroikuma/shiroikuma-jisho).
 
 ```
-shiroikuma-jisho-subtitles -d ~/books/Lázár
+shiroikuma-jisho-subtitles ~/books/Lázár
 ```
 
 One command. Whatever EPUB, whatever audio — one file or a hundred and eleven —
@@ -45,8 +45,9 @@ text is the **book's own**, not the transcriber's.
   aligning them precisely. MP3 books are converted to M4B **first**, before
   anything else, and the M4B is written beside its MP3 under the same basename.
   Your MP3s are never touched or deleted; the tool ignores them once an M4B
-  exists and prints the command to remove them if you want to.
-  `--keep-mp3` opts out.
+  exists. `-d` deletes them — but only after each M4B is verified to be real
+  audio of the same length, so a bad conversion can never take the original with
+  it, and it asks first unless `-y` is given. `--keep-mp3` skips conversion.
 - **Damaged files.** Audio is decoded through ffmpeg and the result checked
   against the container's own duration, because a decoder that quietly returns
   five per cent of a file still produces a full set of confident-looking SRTs.
@@ -68,11 +69,12 @@ an RTX 5090, so a 7¾-hour book is two hours or five minutes.
 ## Use
 
 ```
-shiroikuma-jisho-subtitles -d BOOKDIR                # language read from the EPUB
-shiroikuma-jisho-subtitles -d BOOKDIR -l de          # or state it
-shiroikuma-jisho-subtitles -d BOOKDIR --report r.txt # keep the run report
-shiroikuma-jisho-subtitles -d BOOKDIR --keep-mp3     # do not convert to M4B
-shiroikuma-jisho-subtitles -d BOOKDIR --dry-run      # align, report, write nothing
+shiroikuma-jisho-subtitles BOOKDIR                # language read from the EPUB
+shiroikuma-jisho-subtitles BOOKDIR -l de          # or state it
+shiroikuma-jisho-subtitles BOOKDIR --report r.txt # keep the run report
+shiroikuma-jisho-subtitles BOOKDIR -d                # …and delete the MP3s
+shiroikuma-jisho-subtitles BOOKDIR --keep-mp3       # do not convert to M4B
+shiroikuma-jisho-subtitles BOOKDIR --dry-run      # align, report, write nothing
 
 shiroikuma-jisho-subtitles convert   -d BOOKDIR      # only MP3 → M4B, then stop
 shiroikuma-jisho-subtitles sentences -d BOOKDIR      # the text, as it will be cued

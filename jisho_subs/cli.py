@@ -63,6 +63,9 @@ def _resolve_inputs(args):
     from .source import find_source
     from .audio import discover
 
+    if getattr(args, "directory_opt", None) and not args.directory:
+        args.directory = args.directory_opt
+
     if args.directory:
         root = os.path.abspath(args.directory)
         if not os.path.isdir(root):
@@ -81,6 +84,7 @@ def _resolve_inputs(args):
 
     shadowed: List[str] = []
     files = discover(audio_root, on_shadow=shadowed.extend)
+    args._shadowed = shadowed
     if not files:
         die(f"no audio files under {audio_root}")
     if shadowed:
@@ -88,6 +92,93 @@ def _resolve_inputs(args):
         log(f"{C.DIM}ignoring {len(shadowed)} superseded file(s) "
             f"(a seek-accurate copy of each exists){C.RESET}")
     return source, files
+
+
+def _resolve_audio_only(args):
+    """Audio alone — `convert` and `probe` have no use for the book text."""
+    from .audio import discover
+
+    if getattr(args, "directory_opt", None) and not args.directory:
+        args.directory = args.directory_opt
+    root = args.audio or args.directory
+    if not root or not os.path.isdir(root):
+        die("pass a book directory, or --audio")
+    shadowed = []
+    files = discover(os.path.abspath(root), on_shadow=shadowed.extend)
+    args._shadowed = shadowed
+    if not files:
+        die(f"no audio files under {root}")
+    if shadowed:
+        log(f"{C.DIM}ignoring {len(shadowed)} superseded file(s) "
+            f"(a seek-accurate copy of each exists){C.RESET}")
+    return files
+
+
+def _confirm_delete(count: int, where: str, assume_yes: bool) -> bool:
+    """Ask before removing audio, defaulting to no.
+
+    Same shape as srt-sentence-split.py's destructive mode: a loud warning, and
+    a bare Enter means *don't*.  `-d` used to mean `--dir`, so a stale command
+    line must not quietly delete a book.
+    """
+    log("")
+    log(f"{C.ERR}*** -d given: {count} MP3 file(s) in {where}")
+    log(f"    will be PERMANENTLY DELETED (each one only after its M4B is")
+    log(f"    verified to be real audio of the same length) ***{C.RESET}")
+    if assume_yes:
+        log(f"{C.DIM}-y given, proceeding without asking{C.RESET}")
+        return True
+    print(f"{C.TAG}[jisho-subs]{C.RESET} {C.TAG}Delete them?{C.RESET} [y/N] ",
+          file=sys.stderr, end="", flush=True)
+    try:
+        answer = input().strip().lower()
+    except (EOFError, KeyboardInterrupt):
+        print(file=sys.stderr)
+        answer = ""
+    if answer in ("y", "yes"):
+        return True
+    log(f"{C.DIM}keeping the MP3s.{C.RESET}")
+    return False
+
+
+def _deletion_candidates(args, stale):
+    """Every MP3 that now has an M4B — freshly converted or from an earlier run.
+
+    Once a book has been converted, discover() shadows its MP3s, so they are no
+    longer in the working set.  They are still on disk, though, and -d has to be
+    able to remove them on a later run rather than only in the same breath as
+    the conversion.
+    """
+    from .audio import SEEK_ACCURATE, probe
+
+    seen = {f.path for f in stale}
+    out = list(stale)
+    for path in getattr(args, "_shadowed", []) or []:
+        if path in seen:
+            continue
+        if os.path.splitext(path)[1].lower() in SEEK_ACCURATE:
+            continue
+        info = probe(path)
+        if info is not None:
+            out.append(info)
+    return out
+
+
+def _delete_mp3s(args, stale, out_dir: str, assume_yes: bool) -> None:
+    from .convert import delete_sources
+
+    targets = _deletion_candidates(args, stale)
+    if not targets:
+        log(f"{C.DIM}-d given, but there are no MP3s left to delete{C.RESET}")
+        return
+    if not _confirm_delete(len(targets), out_dir, assume_yes):
+        return
+    deleted, kept = delete_sources(targets, out_dir, log=lambda m: log(m))
+    log(f"  {C.OK}deleted {len(deleted)} MP3 file(s){C.RESET}")
+    if kept:
+        log(f"  {C.WARN}kept {len(kept)} whose replacement did not verify{C.RESET}")
+        for name, why in kept[:5]:
+            log(f"    {name}: {why}")
 
 
 def _rediscover(directory: str):
@@ -133,6 +224,9 @@ def cmd_probe(args) -> int:
 def _resolve_reference_only(args) -> str:
     """The reference file alone — `sentences` needs no audio."""
     from .source import find_source
+
+    if getattr(args, "directory_opt", None) and not args.directory:
+        args.directory = args.directory_opt
     if args.epub:
         if not os.path.exists(args.epub):
             die(f"reference file does not exist: {args.epub}")
@@ -167,11 +261,14 @@ def cmd_sentences(args) -> int:
 def cmd_convert(args) -> int:
     from .convert import convert, have_ffmpeg, needs_conversion, target_dir
 
-    _source, files = _resolve_inputs(args)
+    files = _resolve_audio_only(args)
     stale = needs_conversion(files)
     if not stale:
         log(f"{C.OK}nothing to convert{C.RESET} — all "
             f"{len(files)} files are already seek-accurate")
+        if args.delete_mp3:
+            where = os.path.dirname(os.path.abspath(files[0].path))
+            _delete_mp3s(args, [], where, args.yes)
         return 0
     if not have_ffmpeg():
         die("ffmpeg not found on PATH")
@@ -185,7 +282,14 @@ def cmd_convert(args) -> int:
               + (f", {len(result.skipped)} already present" if result.skipped else ""))
     for name, err in result.failed:
         log(f"  {C.ERR}failed{C.RESET} {name}: {err}")
-    return 1 if result.failed else 0
+    if result.failed:
+        return 1
+    if args.delete_mp3:
+        _delete_mp3s(args, stale, result.out_dir, args.yes)
+    else:
+        log(f"{C.DIM}the MP3s are still there; -d deletes them once each M4B "
+            f"verifies{C.RESET}")
+    return 0
 
 
 def cmd_lint(args) -> int:
@@ -257,9 +361,11 @@ def cmd_run(args) -> int:
             log(f"  {C.ERR}failed{C.RESET} {name}: {err}")
         if result.failed:
             die(f"{len(result.failed)} file(s) failed to convert")
+        if args.delete_mp3:
+            _delete_mp3s(args, stale, result.out_dir, args.yes)
         files = _rediscover(result.out_dir)
         log(f"  now working on {len(files)} M4B files")
-        if result.made or result.skipped:
+        if (result.made or result.skipped) and not args.delete_mp3:
             mp3s = os.path.join(out_dir, "*.mp3")
             log("")
             log(f"  {C.WARN}the MP3s are still there, and the app lists every audio")
@@ -379,8 +485,10 @@ examples:
     p.add_argument("--version", action="version", version=f"jisho-subs {__version__}")
 
     common = argparse.ArgumentParser(add_help=False)
-    common.add_argument("-d", "--dir", dest="directory",
+    common.add_argument("directory", nargs="?",
                         help="book directory holding the EPUB and the audio")
+    common.add_argument("--dir", dest="directory_opt",
+                        help="same as the positional argument")
     common.add_argument("--epub", help="reference EPUB or PDF (overrides -d)")
     common.add_argument("--audio", help="directory of audio files (overrides -d)")
     common.add_argument("-l", "--lang",
@@ -405,6 +513,11 @@ examples:
     run.add_argument("--convert-to", help="where converted audio should go "
                                           "(default: a sibling '… [m4b]' directory)")
     run.add_argument("--jobs", type=int, help="parallel conversions")
+    run.add_argument("-d", "--delete-mp3", dest="delete_mp3", action="store_true",
+                     help="DESTRUCTIVE: delete each MP3 once its M4B is verified. "
+                          "Asks first unless -y is given.")
+    run.add_argument("-y", "--yes", action="store_true",
+                     help="skip the confirmation prompt")
     run.add_argument("--force", action="store_true",
                      help="ignore cached transcripts and re-run ASR")
     run.add_argument("--dry-run", action="store_true", help="do not write SRTs")
@@ -426,6 +539,10 @@ examples:
     cv.add_argument("--convert-to")
     cv.add_argument("--jobs", type=int)
     cv.add_argument("--force", action="store_true")
+    cv.add_argument("-d", "--delete-mp3", dest="delete_mp3", action="store_true",
+                    help="DESTRUCTIVE: delete each MP3 once its M4B is verified")
+    cv.add_argument("-y", "--yes", action="store_true",
+                    help="skip the confirmation prompt")
     cv.set_defaults(func=cmd_convert)
 
     ln = sub.add_parser("lint", help="check SRTs against the app's parser contract")

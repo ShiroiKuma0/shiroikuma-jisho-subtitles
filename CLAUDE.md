@@ -61,8 +61,11 @@ two in step if the app changes it. Conversion writes the M4B **beside its MP3**,
 basename, and never touches the original — so one folder ends up holding both
 copies of every track. `audio.prefer_seekable()` is what stops the tool
 processing each track twice; the app has no such filter, so its chapter list
-shows both until 白い熊 removes the MP3s, and the tool prints that command
-without running it.
+shows both until the MP3s go — which `-d` does, deleting each MP3 only after
+`convert.verify_replacement()` confirms its M4B probes as audio of the same
+length. That check is the whole safety story for the one irreversible thing this
+tool does; do not weaken it to "the file exists". `-d` used to mean `--dir`, so
+the prompt defaults to no.
 
 Do not reuse MP3-derived SRTs against the M4B — AAC encoder delay shifts the
 duration (238.315 s → 238.277 s on the first Lázár track), so the timings are

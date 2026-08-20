@@ -505,3 +505,80 @@ def test_a_lone_mp3_is_still_used(tmp_path):
     _make_mp3(tmp_path / "solo.mp3", seconds=1)
     found = discover(str(tmp_path))
     assert len(found) == 1 and found[0].path.endswith(".mp3")
+
+
+# -- deleting the MP3s after conversion (-d) -----------------------------
+
+def test_mp3_is_deleted_only_after_its_m4b_verifies(tmp_path):
+    from jisho_subs.audio import probe
+    from jisho_subs.convert import convert, delete_sources, have_ffmpeg, target_dir
+    if not have_ffmpeg():
+        pytest.skip("ffmpeg not available")
+    src = probe(_make_mp3(tmp_path / "a.mp3", seconds=2))
+    convert([src], target_dir([src]))
+    deleted, kept = delete_sources([src], str(tmp_path))
+    assert deleted == ["a.mp3"] and kept == []
+    assert not (tmp_path / "a.mp3").exists()
+    assert (tmp_path / "a.m4b").exists()
+
+
+def test_mp3_survives_when_the_m4b_is_missing(tmp_path):
+    from jisho_subs.audio import probe
+    from jisho_subs.convert import delete_sources
+    src = probe(_make_mp3(tmp_path / "a.mp3", seconds=1))
+    deleted, kept = delete_sources([src], str(tmp_path))
+    assert deleted == [] and len(kept) == 1
+    assert (tmp_path / "a.mp3").exists(), "never delete without a replacement"
+
+
+def test_mp3_survives_when_the_m4b_is_truncated(tmp_path):
+    """A half-written conversion must not take the original with it."""
+    from jisho_subs.audio import probe
+    from jisho_subs.convert import convert, delete_sources, have_ffmpeg, target_dir
+    if not have_ffmpeg():
+        pytest.skip("ffmpeg not available")
+    src = probe(_make_mp3(tmp_path / "a.mp3", seconds=4))
+    convert([src], target_dir([src]))
+    # Re-encode the replacement to half its length, simulating a bad convert.
+    import subprocess
+    subprocess.run(["ffmpeg", "-nostdin", "-v", "error", "-y", "-i",
+                    str(tmp_path / "a.m4b"), "-t", "1", "-c", "copy",
+                    str(tmp_path / "short.m4b")], check=True)
+    os.replace(tmp_path / "short.m4b", tmp_path / "a.m4b")
+    deleted, kept = delete_sources([src], str(tmp_path))
+    assert deleted == [] and len(kept) == 1
+    assert "length differs" in kept[0][1]
+    assert (tmp_path / "a.mp3").exists()
+
+
+def test_mp3_survives_when_the_m4b_is_not_audio(tmp_path):
+    from jisho_subs.audio import probe
+    from jisho_subs.convert import delete_sources
+    src = probe(_make_mp3(tmp_path / "a.mp3", seconds=1))
+    (tmp_path / "a.m4b").write_bytes(b"not audio at all")
+    deleted, kept = delete_sources([src], str(tmp_path))
+    assert deleted == [] and (tmp_path / "a.mp3").exists()
+
+
+def test_already_converted_mp3s_are_still_deletable_on_a_later_run(tmp_path):
+    """discover() shadows them, so -d must find them by another route."""
+    from jisho_subs.audio import discover, probe
+    from jisho_subs.convert import convert, delete_sources, have_ffmpeg, target_dir
+    if not have_ffmpeg():
+        pytest.skip("ffmpeg not available")
+    for i in (1, 2):
+        _make_mp3(tmp_path / f"{i:02d} t.mp3", seconds=1)
+    srcs = [probe(str(tmp_path / f"{i:02d} t.mp3")) for i in (1, 2)]
+    convert(srcs, target_dir(srcs))
+
+    shadowed = []
+    working = discover(str(tmp_path), on_shadow=shadowed.extend)
+    assert all(f.path.endswith(".m4b") for f in working)
+    assert len(shadowed) == 2, "the MP3s are out of the working set…"
+
+    # …but still on disk, and still deletable via the shadowed list.
+    targets = [probe(p) for p in shadowed]
+    deleted, kept = delete_sources(targets, str(tmp_path))
+    assert len(deleted) == 2 and kept == []
+    assert not list(tmp_path.glob("*.mp3"))
+    assert len(list(tmp_path.glob("*.m4b"))) == 2
