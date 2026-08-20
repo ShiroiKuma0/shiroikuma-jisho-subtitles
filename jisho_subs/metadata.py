@@ -56,8 +56,11 @@ _YEAR = re.compile(r'\((\d{3,4})(?:-\d\d-\d\d)?\)')
 
 #: Scripts that identify a language on sight.  Kana is decisive for Japanese —
 #: kanji alone is not, since it is shared with Chinese.
+#: Letters only.  The wider kana blocks include CJK punctuation, and a German
+#: filename mangled into "Erw・ungen" carries U+30FB — enough, with the whole
+#: block matched, to declare Der Zauberberg Japanese.
 _SCRIPTS = (
-    ('ja', re.compile(r'[぀-ゟ゠-ヿ]')),          # hiragana, katakana
+    ('ja', re.compile(r'[ぁ-ゖァ-ヺー]')),        # hiragana and katakana letters
     ('ru', re.compile(r'[Ѐ-ӿ]')),                    # Cyrillic
 )
 
@@ -78,20 +81,33 @@ _DIACRITICS = {
 _WORDS = {
     # No word that is also ordinary English — "die", "man", "was", "wie" all
     # occur in English titles and would drag them into German.
-    'de': {'der', 'das', 'und', 'von', 'ein', 'eine', 'nicht', 'sprach',
-           'für', 'über', 'zur', 'zum', 'mit', 'auf', 'aus', 'kapitel',
-           'jenseits', 'böse', 'geschwister', 'vorrede', 'erstes', 'zweites',
-           'drittes', 'wird', 'seele', 'menschen'},
+    'de': {'der', 'das', 'und', 'von', 'ein', 'eine', 'einen', 'einem',
+           'eines', 'dem', 'den', 'nicht', 'sprach', 'für', 'über', 'zur',
+           'zum', 'mit', 'auf', 'aus', 'kapitel', 'jenseits', 'böse',
+           'geschwister', 'vorrede', 'erstes', 'zweites', 'drittes', 'wird',
+           'seele', 'menschen', 'im', 'am', 'vom', 'beim', 'wenn', 'aber',
+           'oder', 'doch', 'nur', 'auch', 'noch', 'schon', 'sehr', 'ganz',
+           'gegen', 'ohne', 'unter', 'zwischen', 'jungen', 'briefe'},
     # No publisher boilerplate.  "Opening Credits", "Chapter", "Part" and
     # "Book" appear in the tags of German and Japanese audiobooks too, and were
-    # enough to label them English.
-    'en': {'the', 'and', 'of', 'to', 'in', 'on', 'for', 'with', 'that',
-           'his', 'her', 'from', 'about', 'how', 'why', 'what'},
-    'pl': {'i', 'w', 'na', 'przez', 'swój', 'nie', 'się', 'jest', 'rozdział'},
+    # enough to label them English.  Nothing that is also an ordinary German
+    # word either — "was", "will", "man", "die", "war", "hat".
+    # "in", "an", "all" and "her" are German words as well, and adding them
+    # was enough to tie "Briefe an einen jungen Dichter" between the two.
+    'en': {'the', 'and', 'of', 'to', 'on', 'for', 'with', 'that',
+           'his', 'from', 'about', 'how', 'why', 'what', 'after',
+           'not', 'into', 'out', 'never', 'been', 'we', 'you',
+           'its', 'my', 'our', 'their', 'more', 'most', 'than', 'then',
+           'when', 'where', 'who', 'which', 'this', 'these', 'those',
+           'are', 'have', 'has', 'had', 'does', 'did', 'can', 'could',
+           'should', 'would', 'without', 'against', 'through', 'everything'},
+    'pl': {'na', 'przez', 'swój', 'nie', 'się', 'jest', 'rozdział', 'że',
+           'oraz', 'aby', 'czy', 'już', 'gdy', 'tylko', 'dla', 'przy',
+           'pan', 'pana', 'pani', 'wszystko', 'audiobooki'},
     'cs': {'na', 'se', 'je', 'kapitola', 'který', 'díl', 'část', 'povídka',
            'porodní', 'obhajoba'},
-    'ru': {'и', 'в', 'на', 'не', 'что', 'глава', 'часть', 'том'},
-    'ja': {'章', '巻', '第', '編', '話'},
+    'ru': {'на', 'не', 'что', 'глава', 'часть', 'том'},
+    'ja': {'章', '巻', '第', '編', '話'},   # matched as characters, not words
 }
 
 
@@ -127,7 +143,11 @@ def guess_language(texts) -> Optional[str]:
         if hits:
             scores[language] = scores.get(language, 0) + hits * 3
 
-    words = set(re.findall(r"[^\W\d_]+", lowered, re.UNICODE))
+    # Two letters minimum: single characters are mostly initials, and
+    # "Timothy W. Ryback" scoring Polish for its middle initial was enough to
+    # tie with English and leave the book undetermined.
+    words = {w for w in re.findall(r"[^\W\d_]+", lowered, re.UNICODE)
+             if len(w) > 1}
     for language, vocabulary in _WORDS.items():
         hits = len(words & vocabulary)
         if hits:
@@ -146,18 +166,31 @@ def guess_language(texts) -> Optional[str]:
     return None
 
 
-def detect_language(info: 'BookInfo', filenames=(), tags=()) -> Optional[str]:
-    """Work out a book's language from what is around it.
+def before_tags(name: Optional[str]) -> str:
+    """The part of a name before ` -- `, where the tags begin.
 
-    Feeds the guesser the *parsed* title and author rather than the raw folder
-    name.  That matters here: 白い熊 tags books with Japanese genre words —
-    「小説」, 「哲学」, 「ルポルタージュ」 — so the raw name of a German book
-    contains kanji, and using it directly labelled Lázár Japanese.
+    Everything after the separator is 白い熊's own tagging — bracket codes, the
+    year, and genre words written in Japanese (「小説」, 「哲学」,
+    「ルポルタージュ」).  Those last are why the whole name cannot be used: a
+    German book's folder ends in kanji.  Everything *before* it is the book's
+    own title and author, and is exactly what identifies the language.
+    """
+    if not name:
+        return ''
+    head = str(name).split(' -- ', 1)[0]
+    return os.path.splitext(head)[0]
+
+
+def detect_language(info: 'BookInfo', filenames=(), tags=()) -> Optional[str]:
+    """Work out a book's language from the names and tags around it.
+
+    Reads the untagged part of the directory and file names — the title and
+    author as written — plus whatever the existing tags say.
     """
     if info.language:
         return info.language
-    texts = [info.book, info.author, info.narrator]
-    texts += list(filenames)
+    texts = [before_tags(info.directory), info.book, info.author, info.narrator]
+    texts += [before_tags(f) for f in filenames]
     for tag in tags:
         if isinstance(tag, dict):
             texts += [tag.get(k) for k in ('title', 'album', 'artist', 'comment')]

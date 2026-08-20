@@ -109,14 +109,24 @@ Cyrillic; without that it would mangle `Anéantir`, `Zoë Schiffer` and `Sněže
 Keep that check if you touch it, and keep the tests that assert those exact
 strings survive.
 
-**Language detection reads the *parsed* fields, never the raw folder name.**
-白い熊 tags books with Japanese genre words — 小説, 哲学, ルポルタージュ — so a
-German book's folder contains kanji, and feeding the raw name to the guesser
-labelled Lázár Japanese. `detect_language()` takes `info.book`/`info.author`
-plus filenames and existing tags. Two other traps are covered by tests: shared
-diacritics (`á` in "Lázár" is Hungarian, not Czech) and publisher boilerplate
-("Opening Credits" in a German book's tags). It returns None rather than guess
-on thin evidence — 111 of 127 books resolve, the rest stay `und`.
+**Language detection reads the name up to ` -- `, and nothing after it.**
+Everything after the separator is 白い熊's tagging — bracket codes, the year, and
+genre words written in Japanese (小説, 哲学, ルポルタージュ), which is why the
+whole name cannot be used: a German book's folder ends in kanji. Everything
+before it is the title and author as written, and carries subtitles and series
+text that the `book`/`author` split discards. `before_tags()` does this for both
+directory and file names.
+
+Four traps, each with a test:
+- Shared diacritics prove nothing — `á` in "Lázár" is Hungarian, not Czech.
+- Publisher boilerplate is not evidence — "Opening Credits" and "Chapter" appear
+  in German and Japanese audiobook tags.
+- An initial is not a word — "Timothy **W.** Ryback" scored Polish and tied.
+- Kana ranges include CJK *punctuation* — a German filename mangled into
+  `Erw・ungen` carries U+30FB, which declared Der Zauberberg Japanese. The
+  script test matches kana letters only.
+
+It declines rather than guess on thin evidence: 116 of 127 books resolve.
 
 **`und` cannot be removed, only replaced.** MP4's `mdhd` box carries a
 mandatory 16-bit packed language field; a file with no language reads `und`

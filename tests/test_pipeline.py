@@ -1034,3 +1034,50 @@ def test_a_byte_order_mark_does_not_leak_into_the_first_cue(tmp_path):
     p = tmp_path / "b.srt"
     p.write_bytes("﻿1\n00:00:01,000 --> 00:00:02,000\nSatz.\n".encode("utf-8"))
     assert read_cues(str(p)) == ["Satz."]
+
+
+# -- the untagged head is what identifies the language -------------------
+
+def test_only_the_part_before_the_separator_is_read():
+    from jisho_subs.metadata import before_tags
+    assert before_tags("Lázár, Nelio Biedermann -- [197] (2026) 小説") \
+        == "Lázár, Nelio Biedermann"
+    assert before_tags("Akademia Pana Kleksa, Jan Brzechwa -- [197] (1946).m4a") \
+        == "Akademia Pana Kleksa, Jan Brzechwa"
+    # No separator: the whole name is the title.
+    assert before_tags("Meditations (180) Marcus Aurelius") \
+        == "Meditations (180) Marcus Aurelius"
+
+
+def test_the_head_carries_text_the_parsing_discards():
+    """A subtitle is dropped from `book`, but still identifies the language."""
+    from jisho_subs.metadata import detect_language, parse_directory
+    name = "Prowadź swój pług przez kości umarłych, Olga Tokarczuk -- [197] (2009)"
+    assert detect_language(parse_directory(name)) == "pl"
+
+
+def test_a_japanese_genre_tag_is_not_read():
+    from jisho_subs.metadata import detect_language, parse_directory
+    assert detect_language(parse_directory(
+        "Erfolg, Lion Feuchtwanger -- [197] (1930) 小説")) != "ja"
+
+
+def test_an_initial_is_not_a_word():
+    """"Timothy W. Ryback" scored Polish for its middle initial and tied."""
+    from jisho_subs.metadata import guess_language
+    assert guess_language(["Takeover, Hitler's final rise to power, "
+                           "Timothy W. Ryback"]) == "en"
+
+
+def test_cjk_punctuation_in_a_mangled_german_name_is_not_japanese():
+    """`Erw・ungen` is a broken `Erwägungen`; U+30FB is punctuation, not kana."""
+    from jisho_subs.metadata import guess_language
+    assert guess_language(["Zauberberg, der, Thomas Mann",
+                           "01_0301 Zweifel und Erw・ungen",
+                           "Der Zauberberg"]) == "de"
+
+
+def test_english_words_that_are_also_german_are_not_used():
+    from jisho_subs.metadata import _WORDS
+    for word in ("in", "an", "all", "her", "was", "will", "man", "die", "wie"):
+        assert word not in _WORDS["en"], f"{word!r} is ambiguous"
