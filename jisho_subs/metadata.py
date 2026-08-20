@@ -416,7 +416,7 @@ def clean_track_title(raw: Optional[str], info: BookInfo,
     naked track numbers and publisher ids.
     """
     if not raw:
-        return None, 'absent'
+        return None, 'no title tag, and the filename gave nothing'
     title = demojibake(raw).strip()
     if is_filename:
         title = os.path.splitext(title)[0]

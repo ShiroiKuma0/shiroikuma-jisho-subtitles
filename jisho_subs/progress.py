@@ -44,6 +44,16 @@ def _hms(seconds: float) -> str:
     return f"{h}:{m:02d}:{s:02d}" if h else f"{m}:{s:02d}"
 
 
+def _mb(rate: float) -> str:
+    """Bytes per second, readably — a decimal only where it carries meaning."""
+    mb = rate / 1e6
+    if mb >= 100:
+        return f"{mb:.0f} MB/s"
+    if mb >= 10:
+        return f"{mb:.0f} MB/s"
+    return f"{mb:.1f} MB/s"
+
+
 def _bar(fraction: float, width: int) -> str:
     """A bar with sub-character resolution, so short runs still visibly move."""
     fraction = min(1.0, max(0.0, fraction))
@@ -79,12 +89,15 @@ class Progress:
 
     def __init__(self, total: int, label: str, tag: str = "",
                  stream=None, enabled: Optional[bool] = None,
-                 min_interval: float = 0.08):
+                 min_interval: float = 0.08, rate_unit: str = "×"):
         self.total = max(1, total)
         self.label = label
         self.tag = tag
         self.stream = stream or sys.stderr
         self.min_interval = min_interval
+        #: "×" for work measured against audio duration; "MB/s" for a stream
+        #: copy, which is bound by the disk and not by how long the audio runs.
+        self.rate_unit = rate_unit
         self.done = 0
         self.weight = 0.0          # e.g. audio seconds completed
         self.started = time.time()
@@ -94,6 +107,10 @@ class Progress:
         if enabled is None:
             enabled = self.stream.isatty() and not os.environ.get("NO_COLOR")
         self.enabled = enabled
+        # Draw straight away, so the line appears at 0/N rather than materialising
+        # part-finished after the first item completes.
+        if self.enabled:
+            self._draw("", force=True)
 
     # -- drawing ---------------------------------------------------------
 
@@ -109,7 +126,10 @@ class Progress:
         elapsed = time.time() - self.started
         rate = self.done / elapsed if elapsed > 0 else 0
         remaining = (self.total - self.done) / rate if rate > 0 else float("inf")
-        speed = f"{self.weight / elapsed:.0f}×" if self.weight and elapsed > 0 else ""
+        speed = ""
+        if self.weight and elapsed > 0:
+            rate = self.weight / elapsed
+            speed = (_mb(rate) if self.rate_unit == "MB/s" else f"{rate:.0f}×")
 
         head = f"{self.tag}{self.label}"
         head_len = len(self.label) + len(_strip_ansi(self.tag))
@@ -168,7 +188,11 @@ class Progress:
             return
         self._plain_marker = decile
         elapsed = time.time() - self.started
-        speed = f", {self.weight / elapsed:.0f}x realtime" if self.weight and elapsed else ""
+        speed = ""
+        if self.weight and elapsed:
+            rate = self.weight / elapsed
+            speed = (f", {_mb(rate)}" if self.rate_unit == "MB/s"
+                     else f", {rate:.0f}x realtime")
         self.stream.write(f"{self.tag}{self.label} {self.done}/{self.total}"
                           f" ({_hms(elapsed)} elapsed{speed})\n")
         self.stream.flush()
@@ -196,7 +220,9 @@ class Progress:
             self.stream.flush()
         line = f"{self.tag}{self.label} — {self.done}/{self.total} in {_hms(elapsed)}"
         if self.weight and elapsed > 0:
-            line += f" ({self.weight / elapsed:.0f}× realtime)"
+            rate = self.weight / elapsed
+            line += (f" ({_mb(rate)})" if self.rate_unit == "MB/s"
+                     else f" ({rate:.0f}× realtime)")
         if summary:
             line += f"  {summary}"
         self.stream.write(line + "\n")

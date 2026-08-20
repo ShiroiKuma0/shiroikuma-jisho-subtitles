@@ -43,9 +43,12 @@ class Steps:
 
     def __call__(self, msg: str) -> None:
         self.n += 1
-        print(f"\n{C.TAG}[jisho-subs]{C.RESET} "
-              f"{C.DIM}step {self.n} of {self.total}{C.RESET}  "
-              f"{C.HEAD}{msg}{C.RESET}", file=sys.stderr)
+        # A lone stage needs no counter — on a library run the book counter is
+        # the progress that matters, and "step 1 of 1" only competes with it.
+        counter = (f"{C.DIM}step {self.n} of {self.total}{C.RESET}  "
+                   if self.total > 1 else "")
+        print(f"\n{C.TAG}[jisho-subs]{C.RESET} {counter}{C.HEAD}{msg}{C.RESET}",
+              file=sys.stderr)
 
 
 def step(msg: str) -> None:
@@ -406,13 +409,14 @@ def cmd_convert(args) -> int:
             log(f"    … and {len(stale) - 8} more")
         return 0
     log(f"converting {len(stale)} files → {out_dir}")
-    bar = Progress(len(stale), "converting", tag=f"{C.TAG}[jisho-subs]{C.RESET} ")
+    bar = Progress(len(stale), "converting",
+                   tag=f"{C.TAG}[jisho-subs]{C.RESET} ", rate_unit="MB/s")
     result = convert(stale, out_dir, jobs=args.jobs, force=args.force,
                      reencode=args.reencode,
                      positions=_book_numbering(files, stale),
                      language=getattr(args, "lang", None),
-                     on_start=lambda f: bar.note(f.name),
-                     on_done=lambda f: bar.advance(f.name, weight=f.duration))
+                     on_done=lambda f: bar.advance(
+                         f.name, weight=os.path.getsize(f.path)))
     bar.close(f"{len(result.made)} converted"
               + (f", {len(result.skipped)} already present" if result.skipped else ""))
     for name, err in result.failed:
@@ -555,9 +559,7 @@ def _resync_from_srt(args, plan, files) -> bool:
         vbar = Progress(used, "snapping", tag=f"{C.TAG}[jisho-subs]{C.RESET} ")
 
         def on_file(phase, audio):
-            if phase == "start":
-                vbar.note(audio.name)
-            else:
+            if phase == "done":
                 vbar.advance(audio.name, weight=audio.duration)
 
         moved = refine(cues, files,
@@ -610,17 +612,19 @@ def _run_one_book(args, plan) -> bool:
 
     if stale:
         already = len(files) - len(stale)
-        step(f"converting {len(stale)} of {len(files)} tracks to M4B"
-             if already else f"converting {len(stale)} tracks to M4B")
+        noun = "track" if len(stale) == 1 else "tracks"
+        step(f"converting {len(stale)} of {len(files)} {noun} to M4B"
+             if already else f"converting {len(stale)} {noun} to M4B")
         if not have_ffmpeg():
             die("ffmpeg is needed to convert MP3 to M4B; pass --keep-mp3 to skip")
         out_dir = args.convert_to or target_dir(stale)
-        cbar = Progress(len(stale), "converting", tag=f"{C.TAG}[jisho-subs]{C.RESET} ")
+        cbar = Progress(len(stale), "converting",
+                        tag=f"{C.TAG}[jisho-subs]{C.RESET} ", rate_unit="MB/s")
         result = convert(stale, out_dir, jobs=args.jobs, force=args.force,
                          reencode=args.reencode, language=lang,
                          positions=_book_numbering(files, stale),
-                         on_start=lambda f: cbar.note(f.name),
-                         on_done=lambda f: cbar.advance(f.name, weight=f.duration))
+                         on_done=lambda f: cbar.advance(
+                             f.name, weight=os.path.getsize(f.path)))
         cbar.close(f"{len(result.made)} converted")
         for name, err in result.failed[:5]:
             log(f"  {C.ERR}failed{C.RESET} {name}: {err}")
@@ -695,9 +699,7 @@ def _run_one_book(args, plan) -> bool:
         vbar = Progress(used, "snapping", tag=f"{C.TAG}[jisho-subs]{C.RESET} ")
 
         def on_file(phase, audio):
-            if phase == "start":
-                vbar.note(audio.name)
-            else:
+            if phase == "done":
                 vbar.advance(audio.name, weight=audio.duration)
 
         moved = refine(cues, files, cache_dir=cache_dir, force=args.force,
@@ -821,7 +823,7 @@ def cmd_run(args) -> int:
     done = failed = 0
     for i, plan in enumerate([p for p in plans if p.busy], 1):
         log("")
-        log(f"{C.HEAD}━━ {i}/{busy}  {plan.name}{C.RESET}")
+        log(f"{C.HEAD}━━ book {i} of {busy} · {plan.name}{C.RESET}")
         try:
             _run_one_book(args, plan)
             done += 1

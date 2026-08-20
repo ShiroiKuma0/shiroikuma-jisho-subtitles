@@ -174,6 +174,12 @@ worst case, 318 000 × 306 000 characters, 44.9 s, 40 MB peak). Chapter matching
 is exactly what makes subplz fail when audio files and text chapters do not
 correspond — which is the normal case.
 
+**A parallel stage must report the file it *finished*, not the one it started.**
+With sixteen workers, `on_start` fires for everything almost at once, so the bar
+read "5/20" beside the name of file 20 — which looks like a stuck bar that then
+jumps. Parallel stages (converting, snapping, writing) advance on completion
+only; the sequential one (transcribing) still shows what is in flight.
+
 **Do not measure a stream copy in xrealtime.** The remux is bound by disk
 throughput, not audio duration — 330 MB/s, 0.03 s per file — so the library's
 30 GB converts in about ninety seconds. Reasoning from a xrealtime figure gave
