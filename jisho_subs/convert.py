@@ -27,7 +27,8 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from typing import List, Optional, Sequence
 
-from .audio import SEEK_ACCURATE, AudioFile, probe
+from .audio import SEEK_ACCURATE, AudioFile, probe, read_tags
+from .metadata import BookInfo, build_tags, parse_directory
 
 #: What the app's dialog recommends.
 BITRATE = "128k"
@@ -39,6 +40,12 @@ class ConvertResult:
     skipped: List[str]
     failed: List[tuple]
     out_dir: str
+    #: What the directory name said about the book.
+    info: Optional[BookInfo] = None
+    #: Track titles that were dropped, as (file, reason).
+    discarded: List[tuple] = None
+    #: Files that got a real track title, as (file, title).
+    titled: List[tuple] = None
 
 
 def needs_conversion(files: Sequence[AudioFile]) -> List[AudioFile]:
@@ -58,17 +65,33 @@ def target_dir(files: Sequence[AudioFile]) -> str:
     return os.path.dirname(os.path.abspath(files[0].path))
 
 
-def _convert_one(src: str, dst: str) -> Optional[str]:
+def _metadata_args(tags: dict) -> List[str]:
+    out = ["-map_metadata", "-1"]      # drop the originals, write repaired ones
+    for key, value in tags.items():
+        if not value:
+            continue
+        if key == "language":
+            # MP4 keeps language on the stream, not on the container: a
+            # format-level -metadata language=… is accepted and then silently
+            # dropped, leaving the track marked "und".
+            out += ["-metadata:s:a:0", f"language={value}"]
+        else:
+            out += ["-metadata", f"{key}={value}"]
+    return out
+
+
+def _convert_one(src: str, dst: str, tags: Optional[dict] = None) -> Optional[str]:
     """Returns None on success, or the error output."""
     tmp = dst + ".part.m4b"
+    meta = _metadata_args(tags) if tags else []
     base = ["ffmpeg", "-nostdin", "-v", "error", "-y", "-i", src]
     # The app's recommended invocation keeps the cover art as attached_pic.
     # Some books ship malformed artwork, so fall back to audio only rather
     # than lose the file over a picture.
     attempts = [
         base + ["-map", "0", "-c:a", "aac", "-b:a", BITRATE,
-                "-c:v", "copy", "-disposition:v", "attached_pic", tmp],
-        base + ["-map", "0:a", "-c:a", "aac", "-b:a", BITRATE, tmp],
+                "-c:v", "copy", "-disposition:v", "attached_pic"] + meta + [tmp],
+        base + ["-map", "0:a", "-c:a", "aac", "-b:a", BITRATE] + meta + [tmp],
     ]
     last = ""
     for cmd in attempts:
@@ -92,11 +115,18 @@ def convert(files: Sequence[AudioFile], out_dir: Optional[str] = None,
     out_dir = out_dir or target_dir(todo)
     os.makedirs(out_dir, exist_ok=True)
 
+    # The folder name is the reliable source for book, author, year and
+    # language; the per-file tags are not.
+    info = parse_directory(os.path.dirname(os.path.abspath(todo[0].path)))
+
     made: List[str] = []
     skipped: List[str] = []
     failed: List[tuple] = []
+    discarded: List[tuple] = []
+    titled: List[tuple] = []
 
-    def work(f: AudioFile):
+    def work(item):
+        index, f = item
         dst = os.path.join(out_dir, f.stem + ".m4b")
         if on_start:
             on_start(f)
@@ -105,7 +135,13 @@ def convert(files: Sequence[AudioFile], out_dir: Optional[str] = None,
             if on_done:
                 on_done(f)
             return
-        err = _convert_one(f.path, dst)
+        tags, dropped = build_tags(info, read_tags(f.path), f.name,
+                                   index, len(todo))
+        if dropped:
+            discarded.append((f.name, dropped))
+        elif tags.get("title"):
+            titled.append((f.name, tags["title"]))
+        err = _convert_one(f.path, dst, tags)
         if err is None:
             made.append(dst)
         else:
@@ -115,9 +151,9 @@ def convert(files: Sequence[AudioFile], out_dir: Optional[str] = None,
 
     jobs = jobs or min(16, max(1, (os.cpu_count() or 4)))
     with ThreadPoolExecutor(max_workers=jobs) as pool:
-        list(pool.map(work, todo))
+        list(pool.map(work, enumerate(todo, 1)))
 
-    return ConvertResult(made, skipped, failed, out_dir)
+    return ConvertResult(made, skipped, failed, out_dir, info, discarded, titled)
 
 
 def converted_files(out_dir: str) -> List[AudioFile]:

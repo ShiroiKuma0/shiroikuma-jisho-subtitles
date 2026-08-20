@@ -48,6 +48,13 @@ text is the **book's own**, not the transcriber's.
   exists. `-d` deletes them — but only after each M4B is verified to be real
   audio of the same length, so a bad conversion can never take the original with
   it, and it asks first unless `-y` is given. `--keep-mp3` skips conversion.
+- **Missing or garbled tags.** MP3 audiobook tags are usually unhelpful, so the
+  conversion rewrites them from the folder name — `Book, Author -- [codes]
+  (year)` gives album, artist, composer (narrator), date, language and track.
+  Per-track titles come from the tag, then the filename, and are left unset
+  rather than filled with a restatement of the book. Chapter markers
+  (`Kapitel 1`, `Глава 7`, `第4章`, `Vorrede`) are kept — that is how the author
+  divided the book. CP1251-as-Latin-1 mojibake is repaired: `×àñòü 1` → `Часть 1`.
 - **Damaged files.** Audio is decoded through ffmpeg and the result checked
   against the container's own duration, because a decoder that quietly returns
   five per cent of a file still produces a full set of confident-looking SRTs.

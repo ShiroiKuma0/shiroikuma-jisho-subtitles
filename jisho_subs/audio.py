@@ -129,6 +129,18 @@ def prefer_seekable(paths: List[str], on_shadow=None) -> List[str]:
     return kept
 
 
+def read_tags(path: str) -> dict:
+    """Every format-level tag on a file, as ffprobe reports them."""
+    try:
+        out = subprocess.run(
+            ["ffprobe", "-v", "error", "-show_entries", "format_tags",
+             "-of", "json", path], capture_output=True, text=True,
+            check=True).stdout
+        return (json.loads(out).get("format") or {}).get("tags") or {}
+    except (subprocess.CalledProcessError, json.JSONDecodeError, OSError):
+        return {}
+
+
 def discover(directory: str, on_choice=None, on_shadow=None) -> List[AudioFile]:
     """Find a book's audio, in natural order.
 

@@ -691,3 +691,103 @@ def test_dash_n_is_dry_run():
     from jisho_subs.cli import build_parser
     args = build_parser().parse_args(["run", "/tmp", "-n"])
     assert args.dry_run is True
+
+
+# -- metadata derived for the converted audio ----------------------------
+
+def test_directory_name_yields_book_author_year_language():
+    from jisho_subs.metadata import parse_directory
+    i = parse_directory("/x/Empuzjon, Olga Tokarczuk -- [197][942] (2022)")
+    assert (i.book, i.author, i.year, i.language) == \
+        ("Empuzjon", "Olga Tokarczuk", "2022", "pl")
+    assert i.iso3 == "pol" and i.is_audiobook
+
+
+def test_year_between_title_and_author_is_understood():
+    from jisho_subs.metadata import parse_directory
+    i = parse_directory("/x/Meditations (180) Marcus Aurelius")
+    assert (i.book, i.author, i.year) == ("Meditations", "Marcus Aurelius", "180")
+
+
+def test_an_inverted_article_is_not_an_author():
+    from jisho_subs.metadata import parse_directory
+    i = parse_directory("/x/Achilles trap, the, Steve Coll -- [197] (2024)")
+    assert i.book == "Achilles trap, the" and i.author == "Steve Coll"
+
+
+def test_a_narrator_is_told_apart_from_the_author():
+    from jisho_subs.metadata import parse_directory
+    i = parse_directory("/x/Homage to Catalonia, George Orwell, Patrick Tull -- [197]")
+    assert i.author == "George Orwell" and i.narrator == "Patrick Tull"
+    j = parse_directory("/x/Knife, Meditations after an attempted murder, "
+                        "Salman Rushdie -- [197] (2024)")
+    assert j.author == "Salman Rushdie", "a subtitle is not a narrator"
+
+
+def test_a_series_part_is_not_a_person():
+    from jisho_subs.metadata import parse_directory
+    i = parse_directory("/x/Absolutely Mental, Season 2, Ricky Gervais -- [197]")
+    assert i.author == "Ricky Gervais" and "Season 2" in i.book
+
+
+def test_cp1251_tags_read_as_latin1_are_repaired():
+    from jisho_subs.metadata import demojibake
+    assert demojibake("×àñòü 1 - 1") == "Часть 1 - 1"
+    assert demojibake("Ëåâ Íèêîëàåâè÷ Òîëñòîé") == "Лев Николаевич Толстой"
+
+
+def test_ordinary_accented_text_is_never_touched():
+    from jisho_subs.metadata import demojibake
+    for s in ("Anéantir", "Zoë Schiffer", "Sněženka", "Nocni wędrowcy",
+              "Lázár", "Fröhliche Wissenschaft"):
+        assert demojibake(s) == s
+
+
+def test_chapter_markers_are_kept_as_titles():
+    """The author divided the book that way; the marker names a real part."""
+    from jisho_subs.metadata import BookInfo, clean_track_title
+    info = BookInfo(directory="d", book="Erfolg", author="Lion Feuchtwanger")
+    for marker in ("Kapitel 1", "Глава 7", "Chapitre 3", "第4章", "Vorrede",
+                   "Часть 1 - 1", "Book I"):
+        title, why = clean_track_title(marker, info)
+        assert title == marker, f"{marker!r} was dropped as {why!r}"
+
+
+def test_restatements_are_discarded():
+    from jisho_subs.metadata import BookInfo, clean_track_title
+    info = BookInfo(directory="Achilles trap, the, Steve Coll -- [197]",
+                    book="Achilles trap, the", author="Steve Coll")
+    for junk in ("The Achilles Trap", "The_Achilles_Trap_A", "Steve Coll",
+                 "001", "DEXN82531555"):
+        title, why = clean_track_title(junk, info)
+        assert title is None, f"{junk!r} survived as {title!r}"
+        assert why
+
+
+def test_padded_counters_go_but_authorial_numbers_stay():
+    from jisho_subs.metadata import BookInfo, clean_track_title
+    info = BookInfo(directory="d", book="Война и мир. Том 1", author="Лев Толстой")
+    assert clean_track_title("Часть 1 - 1", info)[0] == "Часть 1 - 1"
+    info2 = BookInfo(directory="d", book="Greenlights", author="X")
+    assert clean_track_title("Greenlights - Part 1", info2)[0] == "Part 1"
+
+
+def test_built_tags_carry_the_folder_facts():
+    from jisho_subs.metadata import build_tags, parse_directory
+    info = parse_directory("/x/Nocni wędrowcy, Wojciech Jagielski -- [197][942] (2021)")
+    tags, dropped = build_tags(info, {"title": "01_nocni wedrowcy",
+                                      "comment": "czyta X"}, "01-nocni.mp3", 1, 22)
+    assert tags["album"] == "Nocni wędrowcy"
+    assert tags["artist"] == tags["album_artist"] == "Wojciech Jagielski"
+    assert tags["date"] == "2021" and tags["language"] == "pol"
+    assert tags["track"] == "1/22"
+    assert tags["comment"] == "czyta X", "unrelated source tags survive"
+    assert "title" not in tags and dropped, "the slug title is not written"
+
+
+def test_language_is_written_on_the_stream_not_the_container():
+    """MP4 drops a format-level language tag, leaving the track 'und'."""
+    from jisho_subs.convert import _metadata_args
+    args = _metadata_args({"language": "pol", "album": "X"})
+    assert "-metadata:s:a:0" in args
+    assert args[args.index("-metadata:s:a:0") + 1] == "language=pol"

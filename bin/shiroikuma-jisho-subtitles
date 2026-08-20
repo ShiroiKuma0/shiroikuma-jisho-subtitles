@@ -119,6 +119,59 @@ ${C}MP3 CONVERSION${R}
 
     Pass ${C}--keep-mp3${R} to skip conversion entirely.
 
+${C}TAGS ON THE CONVERTED AUDIO${R}
+    An MP3 audiobook's own tags are usually somewhere between unhelpful and
+    absent, so the conversion rewrites them from what is actually known.
+
+    ${B}From the folder name${R}, which follows ${C}Book, Author -- [codes] (year)${R}:
+
+      ${C}album${R}         the book
+      ${C}artist${R}        the author, also written as album_artist
+      ${C}composer${R}      the narrator, when the folder names one — either as a
+                    third comma part or as ${D}(gelesen von …)${R}, ${D}(исполнитель …)${R}
+      ${C}date${R}          the year in parentheses.  Also understood at the front
+                    of the name, and between title and author as in
+                    ${D}Meditations (180) Marcus Aurelius${R}
+      ${C}language${R}      from the bracket code — 227 ja · 107 de · 007 en ·
+                    467 ru · 677 cs · 942 pl.  Written on the audio stream,
+                    since MP4 keeps language there and silently drops a
+                    container-level one
+      ${C}track${R}         position out of the total, in natural filename order
+
+    An inverted article stays with the title, so ${D}Achilles trap, the, Steve
+    Coll${R} does not yield an author called "the"; a third comma part is read as
+    a narrator when it looks like a person and as part of the title when it
+    does not, so ${D}Knife, Meditations after an attempted murder, Salman
+    Rushdie${R} still credits Rushdie.
+
+    ${B}Per track${R}, a title is taken from the file's own tag when it says
+    something, from the filename when the tag does not, and left unset rather
+    than filled with a restatement.
+
+    ${B}Kept${R} — anything naming a part of the work, including bare chapter
+    markers: ${D}Kapitel 1${R}, ${D}Глава 7${R}, ${D}Chapitre 3${R}, ${D}第4章${R}, ${D}Vorrede${R},
+    ${D}Часть 1 - 1${R}.  That is how the author divided the book.
+
+    ${B}Discarded${R} — strings that only repeat what is already known:
+      ${D}·${R} the book title on every track ${D}(Also sprach Zarathustra: Ein Buch
+        für Alle und Keinen, 175 times)${R}
+      ${D}·${R} the same title reordered into a filename slug
+        ${D}(The_Achilles_Trap_A against "Achilles trap, the")${R}
+      ${D}·${R} the author's name used as a track title
+      ${D}·${R} a naked track number, and publisher ids like ${D}DEXN82531555${R}
+    A publisher's padded counter is stripped ${D}(… - 001)${R} but the author's own
+    number is not, so ${D}Часть 1 - 1${R} keeps its chapter.
+
+    ${B}Mojibake is repaired.${R}  Russian releases often store CP1251 tag bytes
+    that the reader decoded as Latin-1, so ${D}Часть 1${R} arrives as ${D}×àñòü 1${R} and
+    the author as ${D}Ëåâ Íèêîëàåâè÷ Òîëñòîé${R}.  Every inherited tag is repaired,
+    not just the ones derived here.  The repair only applies when the result
+    comes out predominantly Cyrillic, so ${D}Anéantir${R}, ${D}Zoë Schiffer${R} and
+    ${D}Sněženka${R} are left alone.
+
+    Tags this tool does not derive — a publisher, a copyright, a narrator
+    credit in a comment — are carried across unchanged, repaired.
+
 ${C}DELETING THE MP3s${R}  ${E}(-d, destructive)${R}
     By default the MP3s are kept, so one folder ends up holding both copies of
     every track.  The tool itself ignores the MP3s once M4Bs exist, but ${B}the app

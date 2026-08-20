@@ -181,6 +181,32 @@ def _delete_mp3s(args, stale, out_dir: str, assume_yes: bool) -> None:
             log(f"    {name}: {why}")
 
 
+def _report_tags(result) -> None:
+    """Say what was written into the M4Bs, and what was left out."""
+    info = result.info
+    if info is None:
+        return
+    log("")
+    log(f"  {C.HEAD}tags written from the folder name{C.RESET}")
+    for label, value in (("album", info.book), ("artist", info.author),
+                         ("composer", info.narrator), ("date", info.year),
+                         ("language", info.iso3)):
+        if value:
+            log(f"    {label:<9} {value}")
+    log(f"    {'track':<9} N/{len(result.made) + len(result.skipped)}")
+    kept = len(result.titled or [])
+    dropped = len(result.discarded or [])
+    if kept:
+        log(f"    {'title':<9} {kept} track(s), e.g. "
+            f"{C.DIM}{result.titled[0][1][:44]}{C.RESET}")
+    if dropped:
+        import collections
+        why = collections.Counter(r for _, r in result.discarded)
+        log(f"  {C.DIM}no title on {dropped} track(s) — nothing there but:{C.RESET}")
+        for reason, n in why.most_common(4):
+            log(f"    {C.DIM}{n:>4}  {reason}{C.RESET}")
+
+
 def _rediscover(directory: str):
     from .audio import discover
     files = discover(directory)
@@ -201,6 +227,16 @@ def _resolve_language(args, source: str) -> str:
         log(f"language not given; using {C.HEAD}{declared}{C.RESET} "
             f"from the book's metadata")
         return normalise_lang(declared)
+
+    # Failing that, the folder's own bracket code — [107] German, [942] Polish
+    # and so on.  Only a few directories carry one, but it costs nothing to look.
+    from .metadata import parse_directory
+    if args.directory:
+        info = parse_directory(os.path.abspath(args.directory))
+        if info.language:
+            log(f"language not given; using {C.HEAD}{info.language}{C.RESET} "
+                f"from the folder's [{[c for c in info.codes if c in __import__('jisho_subs.metadata', fromlist=['x']).LANGUAGE_CODES][0]}] code")
+            return normalise_lang(info.language)
     die("could not determine the language; pass -l/--lang")
 
 
@@ -284,6 +320,7 @@ def cmd_convert(args) -> int:
         log(f"  {C.ERR}failed{C.RESET} {name}: {err}")
     if result.failed:
         return 1
+    _report_tags(result)
     if args.delete_mp3:
         _delete_mp3s(args, stale, result.out_dir, args.yes)
     else:
@@ -370,6 +407,7 @@ def cmd_run(args) -> int:
             log(f"  {C.ERR}failed{C.RESET} {name}: {err}")
         if result.failed:
             die(f"{len(result.failed)} file(s) failed to convert")
+        _report_tags(result)
         if args.delete_mp3:
             _delete_mp3s(args, stale, result.out_dir, args.yes)
         files = _rediscover(result.out_dir)

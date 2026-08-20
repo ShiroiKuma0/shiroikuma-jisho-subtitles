@@ -82,6 +82,23 @@ long before the write step, so an early version re-encoded whole audiobooks —
 and with `-d`, deleted the originals — while promising to write nothing. Dry
 runs now skip conversion and align against the MP3s, saying so.
 
+**`metadata.py` was derived from the library, not invented.** The rules come
+from scanning all 127 books and 4,376 files in `~/〇/[197] オーディオブック`: only
+82 books have a usable track title in their tags and 8 more in their filenames.
+Two findings shaped it. Chapter markers must be **kept** — they name a real part
+of the work, and dropping them cost 30 books their titles. And the language
+bracket codes are used consistently on ebook files but appear on only 3 of 127
+audiobook folders, so language is a bonus, never a source to depend on.
+
+`demojibake()` guards itself by requiring the repaired string to come out ≥80 %
+Cyrillic; without that it would mangle `Anéantir`, `Zoë Schiffer` and `Sněženka`.
+Keep that check if you touch it, and keep the tests that assert those exact
+strings survive.
+
+MP4 keeps `language` on the **stream**, not the container. A format-level
+`-metadata language=…` is accepted by ffmpeg and silently dropped, leaving the
+track marked `und`.
+
 ## Architecture note
 
 There is no chapter matching, and adding it would be a regression. Global
