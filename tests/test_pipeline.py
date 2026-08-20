@@ -431,7 +431,8 @@ def test_conversion_produces_a_seekable_m4b_and_keeps_the_original(tmp_path):
     assert os.path.exists(src), "the original must never be touched"
 
     info = probe(made)
-    assert info.codec == "aac"
+    # The MP3 stream is copied in, not re-encoded: same audio, smaller file.
+    assert info.codec == "mp3"
     assert "mp4" in info.container
     # The basename must survive, or the app stops pairing SRT with audio.
     assert os.path.splitext(os.path.basename(made))[0] == "001 Track"
@@ -539,11 +540,13 @@ def test_mp3_survives_when_the_m4b_is_truncated(tmp_path):
         pytest.skip("ffmpeg not available")
     src = probe(_make_mp3(tmp_path / "a.mp3", seconds=4))
     convert([src], target_dir([src]))
-    # Re-encode the replacement to half its length, simulating a bad convert.
+    # Truncate the replacement, simulating a conversion that died half way.
+    # -f mp4 is required: a .m4b extension picks the ipod muxer, which refuses
+    # to carry MP3 at all.
     import subprocess
     subprocess.run(["ffmpeg", "-nostdin", "-v", "error", "-y", "-i",
                     str(tmp_path / "a.m4b"), "-t", "1", "-c", "copy",
-                    str(tmp_path / "short.m4b")], check=True)
+                    "-f", "mp4", str(tmp_path / "short.m4b")], check=True)
     os.replace(tmp_path / "short.m4b", tmp_path / "a.m4b")
     deleted, kept = delete_sources([src], str(tmp_path))
     assert deleted == [] and len(kept) == 1
@@ -791,3 +794,50 @@ def test_language_is_written_on_the_stream_not_the_container():
     args = _metadata_args({"language": "pol", "album": "X"})
     assert "-metadata:s:a:0" in args
     assert args[args.index("-metadata:s:a:0") + 1] == "language=pol"
+
+
+def test_the_copy_is_bit_identical_to_the_source(tmp_path):
+    """Lossless is a claim worth checking, not asserting."""
+    import subprocess
+    from jisho_subs.audio import probe
+    from jisho_subs.convert import convert, have_ffmpeg, target_dir
+    if not have_ffmpeg():
+        pytest.skip("ffmpeg not available")
+
+    src = _make_mp3(tmp_path / "a.mp3", seconds=6)
+    convert([probe(src)], target_dir([probe(src)]))
+    made = str(tmp_path / "a.m4b")
+
+    def decoded(path):
+        return subprocess.run(
+            ["ffmpeg", "-nostdin", "-v", "error", "-i", path, "-map", "0:a",
+             "-ss", "1", "-t", "3", "-f", "s16le", "-ar", "44100", "-ac", "2", "-"],
+            capture_output=True).stdout
+
+    assert decoded(src) == decoded(made), "the copied audio must be identical"
+
+
+def test_reencode_falls_back_to_aac(tmp_path):
+    from jisho_subs.audio import probe
+    from jisho_subs.convert import convert, have_ffmpeg, target_dir
+    if not have_ffmpeg():
+        pytest.skip("ffmpeg not available")
+    src = probe(_make_mp3(tmp_path / "a.mp3", seconds=2))
+    convert([src], target_dir([src]), reencode=True)
+    assert probe(str(tmp_path / "a.m4b")).codec == "aac"
+
+
+def test_the_fallback_bitrate_follows_the_source(tmp_path):
+    """A fixed rate inflates a 32 kbps file and degrades a 192 kbps one."""
+    import subprocess
+    from jisho_subs.audio import probe
+    from jisho_subs.convert import _target_bitrate, MIN_BITRATE, MAX_BITRATE
+    for rate in (32, 128, 256):
+        path = str(tmp_path / f"{rate}.mp3")
+        subprocess.run(["ffmpeg", "-nostdin", "-v", "error", "-y", "-f", "lavfi",
+                        "-i", "sine=frequency=440:duration=2", "-c:a", "libmp3lame",
+                        "-b:a", f"{rate}k", path], check=True)
+        got = _target_bitrate(probe(path))
+        assert MIN_BITRATE <= got <= MAX_BITRATE
+        assert abs(got - min(max(rate, MIN_BITRATE), MAX_BITRATE)) <= 8, \
+            f"{rate}k source produced {got}k"

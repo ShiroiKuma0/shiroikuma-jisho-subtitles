@@ -53,6 +53,13 @@ typically a few milliseconds *before* a pause rather than inside it, which is
 why the test covers a fragment-then-pause case and not just "start is in
 silence".
 
+**The conversion is a lossless remux, and `-f mp4` is what makes it possible.**
+A `.m4b` extension selects ffmpeg's *ipod* muxer, which refuses MP3 outright —
+"Could not find tag for codec mp3" — so without `-f mp4` the remux silently
+becomes a failed conversion and falls through to the AAC path. Verified on the
+phone: MP3-in-MP4 plays and seeks precisely in shiroikuma-jisho. Bit-identity is
+covered by a test that decodes both and compares, not by assertion.
+
 **MP3 conversion is not optional polish.** The app's own dialog
 (`_showMp3SeekWarningDialog`) states that with MP3 "auto-pause will fire at the
 wrong sentence boundaries" — so precisely-aligned cues are wasted on MP3. The

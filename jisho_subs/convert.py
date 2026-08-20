@@ -30,8 +30,11 @@ from typing import List, Optional, Sequence
 from .audio import SEEK_ACCURATE, AudioFile, probe, read_tags
 from .metadata import BookInfo, build_tags, parse_directory
 
-#: What the app's dialog recommends.
-BITRATE = "128k"
+#: Fallback AAC bitrate when the source's own rate cannot be read.
+DEFAULT_BITRATE = 128
+#: Re-encoding outside this range is pointless in one direction or wasteful in
+#: the other: the library runs from 32 to 192 kbps.
+MIN_BITRATE, MAX_BITRATE = 48, 192
 
 
 @dataclass
@@ -46,6 +49,8 @@ class ConvertResult:
     discarded: List[tuple] = None
     #: Files that got a real track title, as (file, title).
     titled: List[tuple] = None
+    #: How each file was produced, as {method: count}.
+    methods: dict = None
 
 
 def needs_conversion(files: Sequence[AudioFile]) -> List[AudioFile]:
@@ -65,6 +70,26 @@ def target_dir(files: Sequence[AudioFile]) -> str:
     return os.path.dirname(os.path.abspath(files[0].path))
 
 
+def _target_bitrate(source: AudioFile) -> int:
+    """Match the source rather than impose a fixed rate.
+
+    Only used when the lossless remux is unavailable.  A fixed 128k quadruples
+    a 32 kbps mono file for no gain and throws quality away from a 192 kbps one;
+    the library holds both.
+    """
+    try:
+        out = subprocess.run(
+            ["ffprobe", "-v", "error", "-show_entries", "format=bit_rate",
+             "-of", "default=nw=1:nk=1", source.path],
+            capture_output=True, text=True, check=True).stdout.strip()
+        kbps = int(out) // 1000
+    except (subprocess.CalledProcessError, ValueError, OSError):
+        return DEFAULT_BITRATE
+    if kbps <= 0:
+        return DEFAULT_BITRATE
+    return max(MIN_BITRATE, min(MAX_BITRATE, kbps))
+
+
 def _metadata_args(tags: dict) -> List[str]:
     out = ["-map_metadata", "-1"]      # drop the originals, write repaired ones
     for key, value in tags.items():
@@ -80,34 +105,62 @@ def _metadata_args(tags: dict) -> List[str]:
     return out
 
 
-def _convert_one(src: str, dst: str, tags: Optional[dict] = None) -> Optional[str]:
-    """Returns None on success, or the error output."""
+def _convert_one(src: str, dst: str, tags: Optional[dict] = None,
+                 reencode: bool = False, bitrate: int = DEFAULT_BITRATE):
+    """Returns ``(error, method)`` — error is None on success.
+
+    The MP3 stream is *copied* into the MP4 container by default, which is
+    genuinely lossless: the decoded samples come back bit-identical, the file is
+    smaller than the AAC one, and it takes a quarter of a second instead of
+    thirteen.  All the MP4 sample index — the thing that fixes seeking — is
+    written either way.
+
+    ``-f mp4`` is not optional there.  A ``.m4b`` extension selects ffmpeg's
+    *ipod* muxer, which refuses MP3 outright ("Could not find tag for codec
+    mp3"), so the remux silently becomes a failed conversion without it.
+
+    Re-encoding to AAC stays as the fallback, for a source MP4 cannot carry and
+    for ``--reencode``.
+    """
     tmp = dst + ".part.m4b"
     meta = _metadata_args(tags) if tags else []
     base = ["ffmpeg", "-nostdin", "-v", "error", "-y", "-i", src]
-    # The app's recommended invocation keeps the cover art as attached_pic.
-    # Some books ship malformed artwork, so fall back to audio only rather
-    # than lose the file over a picture.
-    attempts = [
-        base + ["-map", "0", "-c:a", "aac", "-b:a", BITRATE,
-                "-c:v", "copy", "-disposition:v", "attached_pic"] + meta + [tmp],
-        base + ["-map", "0:a", "-c:a", "aac", "-b:a", BITRATE] + meta + [tmp],
+    rate = f"{bitrate}k"
+
+    # Cover art is kept where it can be; some books ship malformed artwork, so
+    # each method also has an audio-only form rather than losing the file to a
+    # picture.
+    lossless = [
+        ("copied losslessly",
+         base + ["-map", "0", "-c", "copy", "-disposition:v", "attached_pic",
+                 "-f", "mp4"] + meta + [tmp]),
+        ("copied losslessly",
+         base + ["-map", "0:a", "-c:a", "copy", "-f", "mp4"] + meta + [tmp]),
     ]
+    encoded = [
+        (f"re-encoded to AAC {rate}",
+         base + ["-map", "0", "-c:a", "aac", "-b:a", rate,
+                 "-c:v", "copy", "-disposition:v", "attached_pic"] + meta + [tmp]),
+        (f"re-encoded to AAC {rate}",
+         base + ["-map", "0:a", "-c:a", "aac", "-b:a", rate] + meta + [tmp]),
+    ]
+    attempts = encoded if reencode else lossless + encoded
+
     last = ""
-    for cmd in attempts:
+    for method, cmd in attempts:
         proc = subprocess.run(cmd, capture_output=True, text=True)
         if proc.returncode == 0 and os.path.exists(tmp) and os.path.getsize(tmp) > 0:
             os.replace(tmp, dst)
-            return None
+            return None, method
         last = (proc.stderr or "").strip()[:200]
         if os.path.exists(tmp):
             os.unlink(tmp)
-    return last or "ffmpeg failed"
+    return (last or "ffmpeg failed"), None
 
 
 def convert(files: Sequence[AudioFile], out_dir: Optional[str] = None,
             jobs: Optional[int] = None, force: bool = False,
-            on_start=None, on_done=None) -> ConvertResult:
+            on_start=None, on_done=None, reencode: bool = False) -> ConvertResult:
     """Convert every non-seek-accurate file into *out_dir*."""
     todo = needs_conversion(files)
     if not todo:
@@ -124,6 +177,7 @@ def convert(files: Sequence[AudioFile], out_dir: Optional[str] = None,
     failed: List[tuple] = []
     discarded: List[tuple] = []
     titled: List[tuple] = []
+    methods: dict = {}
 
     def work(item):
         index, f = item
@@ -141,8 +195,10 @@ def convert(files: Sequence[AudioFile], out_dir: Optional[str] = None,
             discarded.append((f.name, dropped))
         elif tags.get("title"):
             titled.append((f.name, tags["title"]))
-        err = _convert_one(f.path, dst, tags)
+        err, method = _convert_one(f.path, dst, tags, reencode=reencode,
+                                   bitrate=_target_bitrate(f))
         if err is None:
+            methods[method] = methods.get(method, 0) + 1
             made.append(dst)
         else:
             failed.append((f.name, err))
@@ -153,7 +209,8 @@ def convert(files: Sequence[AudioFile], out_dir: Optional[str] = None,
     with ThreadPoolExecutor(max_workers=jobs) as pool:
         list(pool.map(work, enumerate(todo, 1)))
 
-    return ConvertResult(made, skipped, failed, out_dir, info, discarded, titled)
+    return ConvertResult(made, skipped, failed, out_dir, info, discarded,
+                         titled, methods)
 
 
 def converted_files(out_dir: str) -> List[AudioFile]:

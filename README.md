@@ -43,7 +43,11 @@ text is the **book's own**, not the transcriber's.
 - **MP3 audio.** The app cannot seek MP3 — its own warning says auto-pause
   "will fire at the wrong sentence boundaries", which defeats the whole point of
   aligning them precisely. MP3 books are converted to M4B **first**, before
-  anything else, and the M4B is written beside its MP3 under the same basename.
+  anything else, and the conversion is **lossless**: the MP3 stream is copied
+  into the MP4 container, not re-encoded, so the audio is bit-identical, the
+  file is smaller than an AAC one, and a track takes 0.25 s instead of 13 s.
+  `--reencode` produces AAC instead, at a bitrate that follows the source.
+  The M4B is written beside its MP3 under the same basename.
   Your MP3s are never touched or deleted; the tool ignores them once an M4B
   exists. `-d` deletes them — but only after each M4B is verified to be real
   audio of the same length, so a bad conversion can never take the original with

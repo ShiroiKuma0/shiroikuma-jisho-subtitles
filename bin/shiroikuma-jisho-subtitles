@@ -101,11 +101,20 @@ ${C}MP3 CONVERSION${R}
     the wrong sentence boundaries${R} — which defeats the whole point of aligning
     cues precisely.  MP4 carries a sample-accurate index; MP3 does not.
 
-    So MP3 books are converted to M4B before anything else, with the exact
-    ffmpeg invocation the app's dialog recommends:
+    So MP3 books are converted to M4B before anything else — and the conversion
+    is ${B}lossless${R}.  The MP3 stream is copied into the MP4 container rather than
+    re-encoded, so the audio is bit-identical to the source, the file comes out
+    smaller than an AAC one, and a track takes a quarter of a second instead of
+    thirteen.  The MP4 sample index — the thing that fixes seeking — is written
+    either way.
 
-        ${D}ffmpeg -i IN.mp3 -map 0 -c:a aac -b:a 128k \\
-               -c:v copy -disposition:v attached_pic OUT.m4b${R}
+        ${D}ffmpeg -i IN.mp3 -map 0 -c copy -disposition:v attached_pic \\
+               -f mp4 OUT.m4b${R}
+
+    ${C}--reencode${R} converts to AAC instead, which is also the automatic fallback
+    for any source MP4 cannot carry.  Its bitrate follows the source rather than
+    a fixed figure: the library runs from 32 to 192 kbps, and a flat 128k would
+    quadruple the smallest files for no gain while degrading the largest.
 
     The M4B is written ${B}beside${R} its MP3, under the same basename, so one SRT
     pairs with either.  ${M}Your MP3s are never touched or deleted.${R}  Because the
@@ -211,7 +220,9 @@ ${C}OPTIONS${R}
     ${C}-o, --out${R} DIR         write the SRTs here instead of beside each audio
                           file.  Beside is the default because that is what
                           makes the app attach them by itself.
-    ${C}--keep-mp3${R}            do not convert MP3 to M4B at all
+    ${C}--keep-mp3${R}            do not convert MP3 to M4B
+    ${C}--reencode${R}            re-encode to AAC instead of copying the MP3
+                          stream in losslessly at all
     ${C}-d, --delete-mp3${R}      ${E}DESTRUCTIVE${R}: delete each MP3 once its own M4B is
                           verified.  Asks first — see DELETING THE MP3s.
     ${C}-y, --yes${R}             answer that question with yes, for unattended runs
@@ -238,6 +249,7 @@ ${C}OPTIONS${R}
     ${C}-y, --yes${R}             skip the confirmation
     ${C}--convert-to${R} DIR      where the M4Bs go
     ${C}--jobs${R} N              parallel conversions
+    ${C}--reencode${R}            re-encode to AAC rather than copy losslessly
     ${C}--force${R}               re-convert even where an M4B already exists
 
   ${B}sentences${R} — print the reference text as it will be cued

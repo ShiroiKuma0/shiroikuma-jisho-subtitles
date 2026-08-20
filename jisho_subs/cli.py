@@ -141,6 +141,37 @@ def _confirm_delete(count: int, where: str, assume_yes: bool) -> bool:
     return False
 
 
+def _shadowed_sources(args):
+    """MP3s that discover() hid because an M4B of the same name exists.
+
+    They are still on disk, so both `-d` and `--force` have to be able to reach
+    them: otherwise re-running a converted book finds nothing to work on and
+    silently does nothing at all.
+    """
+    from .audio import SEEK_ACCURATE, probe
+
+    out = []
+    for path in getattr(args, "_shadowed", []) or []:
+        if os.path.splitext(path)[1].lower() in SEEK_ACCURATE:
+            continue
+        info = probe(path)
+        if info is not None:
+            out.append(info)
+    return out
+
+
+def _conversion_candidates(args, files):
+    """What to convert — plus, with --force, what was already converted once."""
+    from .convert import needs_conversion
+
+    stale = needs_conversion(files)
+    if getattr(args, "force", False):
+        seen = {f.path for f in stale}
+        stale += [f for f in _shadowed_sources(args) if f.path not in seen]
+        stale.sort(key=lambda f: f.path)
+    return stale
+
+
 def _deletion_candidates(args, stale):
     """Every MP3 that now has an M4B — freshly converted or from an earlier run.
 
@@ -149,19 +180,8 @@ def _deletion_candidates(args, stale):
     able to remove them on a later run rather than only in the same breath as
     the conversion.
     """
-    from .audio import SEEK_ACCURATE, probe
-
     seen = {f.path for f in stale}
-    out = list(stale)
-    for path in getattr(args, "_shadowed", []) or []:
-        if path in seen:
-            continue
-        if os.path.splitext(path)[1].lower() in SEEK_ACCURATE:
-            continue
-        info = probe(path)
-        if info is not None:
-            out.append(info)
-    return out
+    return list(stale) + [f for f in _shadowed_sources(args) if f.path not in seen]
 
 
 def _delete_mp3s(args, stale, out_dir: str, assume_yes: bool) -> None:
@@ -186,6 +206,9 @@ def _report_tags(result) -> None:
     info = result.info
     if info is None:
         return
+    for method, n in sorted((result.methods or {}).items(), key=lambda kv: -kv[1]):
+        mark = C.OK if "losslessly" in method else C.WARN
+        log(f"  {mark}{n} file(s) {method}{C.RESET}")
     log("")
     log(f"  {C.HEAD}tags written from the folder name{C.RESET}")
     for label, value in (("album", info.book), ("artist", info.author),
@@ -298,7 +321,7 @@ def cmd_convert(args) -> int:
     from .convert import convert, have_ffmpeg, needs_conversion, target_dir
 
     files = _resolve_audio_only(args)
-    stale = needs_conversion(files)
+    stale = _conversion_candidates(args, files)
     if not stale:
         log(f"{C.OK}nothing to convert{C.RESET} — all "
             f"{len(files)} files are already seek-accurate")
@@ -312,6 +335,7 @@ def cmd_convert(args) -> int:
     log(f"converting {len(stale)} files → {out_dir}")
     bar = Progress(len(stale), "converting", tag=f"{C.TAG}[jisho-subs]{C.RESET} ")
     result = convert(stale, out_dir, jobs=args.jobs, force=args.force,
+                     reencode=args.reencode,
                      on_start=lambda f: bar.note(f.name),
                      on_done=lambda f: bar.advance(f.name, weight=f.duration))
     bar.close(f"{len(result.made)} converted"
@@ -374,7 +398,7 @@ def cmd_run(args) -> int:
     lang = _resolve_language(args, source)
     book = os.path.splitext(os.path.basename(source))[0]
 
-    stale = needs_conversion(files) if args.convert else []
+    stale = _conversion_candidates(args, files) if args.convert else []
     if stale and args.dry_run:
         # --dry-run promises to write nothing.  Re-encoding a whole audiobook
         # (and, with -d, deleting the originals) is emphatically writing
@@ -396,9 +420,13 @@ def cmd_run(args) -> int:
         log("  the app cannot seek MP3 accurately, so auto-pause would fire at")
         log("  the wrong sentence boundaries. The M4B is written beside each")
         log("  MP3 under the same name; the MP3 itself is left untouched.")
+        if not args.reencode:
+            log(f"  {C.DIM}the MP3 stream is copied in, not re-encoded — "
+                f"same audio, smaller file{C.RESET}")
         log(f"  → {out_dir}")
         cbar = Progress(len(stale), "converting", tag=f"{C.TAG}[jisho-subs]{C.RESET} ")
         result = convert(stale, out_dir, jobs=args.jobs, force=args.force,
+                         reencode=args.reencode,
                          on_start=lambda f: cbar.note(f.name),
                          on_done=lambda f: cbar.advance(f.name, weight=f.duration))
         cbar.close(f"{len(result.made)} converted"
@@ -567,6 +595,9 @@ is in the wrapper: shiroikuma-jisho-subtitles -h
                      help="where converted audio should go "
                           "(default: beside the MP3 it came from)")
     run.add_argument("--jobs", type=int, help="parallel conversions")
+    run.add_argument("--reencode", action="store_true",
+                     help="re-encode to AAC instead of copying the MP3 stream "
+                          "into the M4B losslessly")
     run.add_argument("-d", "--delete-mp3", dest="delete_mp3", action="store_true",
                      help="DESTRUCTIVE: delete each MP3 once its M4B is verified. "
                           "Asks first unless -y is given.")
@@ -595,6 +626,8 @@ is in the wrapper: shiroikuma-jisho-subtitles -h
     cv.add_argument("--convert-to")
     cv.add_argument("--jobs", type=int)
     cv.add_argument("--force", action="store_true")
+    cv.add_argument("--reencode", action="store_true",
+                    help="re-encode to AAC instead of copying losslessly")
     cv.add_argument("-d", "--delete-mp3", dest="delete_mp3", action="store_true",
                     help="DESTRUCTIVE: delete each MP3 once its M4B is verified")
     cv.add_argument("-y", "--yes", action="store_true",
