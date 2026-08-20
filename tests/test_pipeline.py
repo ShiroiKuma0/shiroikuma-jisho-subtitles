@@ -615,3 +615,40 @@ def test_the_wrapper_reports_a_missing_venv_rather_than_crashing(tmp_path):
     assert r.returncode != 0
     assert "no interpreter" in r.stderr
     assert "-m venv" in r.stderr, "it should say how to create one"
+
+
+# -- rewriting over an earlier run ---------------------------------------
+
+def test_an_existing_srt_is_overwritten_and_counted(tmp_path):
+    files = [_F(str(tmp_path / "a.mp3"), 30.0)]
+    (tmp_path / "a.srt").write_text("1\n00:00:01,000 --> 00:00:02,000\nold\n",
+                                    encoding="utf-8")
+    stats = srt_mod.write_for_files([_cue("neu.", 1.0, 3.0)], files, str(tmp_path))
+    assert stats.replaced == 1
+    assert "neu." in (tmp_path / "a.srt").read_text(encoding="utf-8")
+    assert "old" not in (tmp_path / "a.srt").read_text(encoding="utf-8")
+
+
+def test_a_stale_srt_is_retired_when_its_audio_yields_no_cues(tmp_path):
+    """Otherwise it keeps pairing, with timings for audio that is gone."""
+    files = [_F(str(tmp_path / "intro.mp3"), 60.0),
+             _F(str(tmp_path / "one.mp3"), 30.0)]
+    (tmp_path / "intro.srt").write_text(
+        "1\n00:00:01,000 --> 00:00:02,000\nstale\n", encoding="utf-8")
+    cues = [align_mod.Cue(Sentence("Satz.", "c", False, 0), 1, 1.0, 2.0, 1.0)]
+    stats = srt_mod.write_for_files(cues, files, str(tmp_path))
+
+    assert not (tmp_path / "intro.srt").exists(), "it must stop pairing"
+    assert len(stats.retired) == 1
+    backups = list(tmp_path.glob("intro.srt.*.bak"))
+    assert len(backups) == 1, "moved aside, not destroyed"
+    assert "stale" in backups[0].read_text(encoding="utf-8")
+
+
+def test_nothing_is_retired_when_there_was_no_earlier_srt(tmp_path):
+    files = [_F(str(tmp_path / "intro.mp3"), 60.0),
+             _F(str(tmp_path / "one.mp3"), 30.0)]
+    cues = [align_mod.Cue(Sentence("Satz.", "c", False, 0), 1, 1.0, 2.0, 1.0)]
+    stats = srt_mod.write_for_files(cues, files, str(tmp_path))
+    assert stats.retired == [] and stats.replaced == 0
+    assert stats.empty_files == ["intro.mp3"]

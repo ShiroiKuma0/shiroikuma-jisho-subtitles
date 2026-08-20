@@ -338,6 +338,15 @@ def cmd_run(args) -> int:
     book = os.path.splitext(os.path.basename(source))[0]
 
     stale = needs_conversion(files) if args.convert else []
+    if stale and args.dry_run:
+        # --dry-run promises to write nothing.  Re-encoding a whole audiobook
+        # (and, with -d, deleting the originals) is emphatically writing
+        # something, so conversion is skipped and the alignment below runs
+        # against the MP3s instead.
+        log(f"{C.WARN}dry run: not converting {len(stale)} MP3 file(s){C.RESET}")
+        log(f"  {C.DIM}the alignment below is against the MP3s; real timings "
+            f"will shift slightly once converted{C.RESET}")
+        stale = []
     step = Steps(6 if stale else 5)
 
     if stale:

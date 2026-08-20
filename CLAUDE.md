@@ -71,6 +71,17 @@ Do not reuse MP3-derived SRTs against the M4B — AAC encoder delay shifts the
 duration (238.315 s → 238.277 s on the first Lázár track), so the timings are
 regenerated from the M4B itself.
 
+**A stale SRT is worse than a missing one.** When a file yields no cues,
+`write_for_files` must not simply skip it: an SRT from an earlier run would stay
+on disk and keep pairing with that audio, carrying timings for a file that no
+longer exists. It is moved aside to a timestamped `.bak` — not deleted, in case
+it was hand-edited.
+
+**`--dry-run` covers conversion and deletion too.** Conversion runs at stage 1,
+long before the write step, so an early version re-encoded whole audiobooks —
+and with `-d`, deleted the originals — while promising to write nothing. Dry
+runs now skip conversion and align against the MP3s, saying so.
+
 ## Architecture note
 
 There is no chapter matching, and adding it would be a regression. Global

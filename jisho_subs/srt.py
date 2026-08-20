@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import os
 import re
+from datetime import datetime
 from dataclasses import dataclass, field
 from typing import List, Optional, Sequence
 
@@ -46,7 +47,9 @@ class WriteStats:
     merged_identical: int = 0
     neutralised_markup: int = 0
     files: int = 0
+    replaced: int = 0
     empty_files: List[str] = field(default_factory=list)
+    retired: List[tuple] = field(default_factory=list)
 
 
 def format_timestamp(seconds: float) -> str:
@@ -146,18 +149,33 @@ def write_for_files(cues: Sequence[Optional[Cue]], files, out_dir: Optional[str]
         target_dir = out_dir or os.path.dirname(audio.path)
         os.makedirs(target_dir, exist_ok=True)
         path = os.path.join(target_dir, audio.stem + ".srt")
+        existed = os.path.exists(path)
         prepared = _prepare(by_file.get(fi, []), audio.duration, stats)
         if not prepared:
             # Wholly unmatched audio is normal — a publisher intro track, for
             # instance — so say so rather than failing.
             stats.empty_files.append(audio.name)
             log(f"  no text  {audio.name}")
+            if existed:
+                # An SRT from an earlier run would otherwise stay behind and
+                # keep pairing with this audio, now carrying timings for a file
+                # that no longer exists — a wrong subtitle looks far more
+                # convincing than a missing one.  Move it aside rather than
+                # delete it, in case it was edited by hand.
+                stamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+                retired = f"{path}.{stamp}.bak"
+                os.replace(path, retired)
+                stats.retired.append((os.path.basename(path),
+                                      os.path.basename(retired)))
+                log(f"  retired  {os.path.basename(path)} (no cues this run)")
             if on_file is not None:
                 on_file(audio.name)
             continue
         with open(path, "w", encoding="utf-8", newline="\n") as fh:
             fh.write(render(prepared))
         stats.cues += len(prepared)
+        if existed:
+            stats.replaced += 1
         stats.files += 1
         log(f"  wrote    {os.path.basename(path)}  ({len(prepared)} cues)")
         if on_file is not None:

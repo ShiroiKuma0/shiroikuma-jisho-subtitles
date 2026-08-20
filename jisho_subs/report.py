@@ -126,6 +126,14 @@ def build(book: str, lang: str, source: str, files, sentences,
     if write_stats.neutralised_markup:
         add(f"    markup fixed    {write_stats.neutralised_markup}"
             f"   [would have been stripped by the app]")
+    if getattr(write_stats, "replaced", 0):
+        add(f"    replaced        {write_stats.replaced}"
+            f"   [existing SRTs overwritten in place]")
+    if getattr(write_stats, "retired", None):
+        add(f"    retired         {len(write_stats.retired)}"
+            f"   [stale SRTs moved aside; their audio had no cues this run]")
+        for old, new in write_stats.retired[:5]:
+            add(f"      {old} -> {new}")
     if write_stats.empty_files:
         add(f"    no text         {len(write_stats.empty_files)} audio files")
         for name in write_stats.empty_files[:6]:
