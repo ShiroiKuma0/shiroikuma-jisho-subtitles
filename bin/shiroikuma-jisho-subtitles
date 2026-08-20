@@ -139,28 +139,77 @@ ${C}DELETING THE MP3s${R}  ${E}(-d, destructive)${R}
     generated SRTs are overwritten in place on a re-run, but no audio is
     touched unless you pass -d.
 
-${C}OPTIONS FOR ${B}run${R}
-    ${C}BOOKDIR${R}             book directory holding the EPUB and the audio
-    ${C}--dir${R} DIR           the same thing, named
-    ${C}--epub${R} FILE         reference EPUB or PDF (overrides -d)
-    ${C}--audio${R} DIR         directory of audio files (overrides -d)
-    ${C}-l, --lang${R} CODE     de, ja, pl, ru, …  read from the EPUB when omitted
-    ${C}-o, --out${R} DIR       where SRTs go (default: beside each audio file,
-                       which is what makes the app pair them automatically)
-    ${C}--keep-mp3${R}          do not convert MP3 to M4B
-    ${C}-d, --delete-mp3${R}    ${E}DESTRUCTIVE${R}: delete each MP3 once its M4B verifies
-    ${C}-y, --yes${R}           skip the confirmation prompt that -d raises
-    ${C}--convert-to${R} DIR    put converted audio somewhere else
-    ${C}--jobs${R} N            parallel conversions
-    ${C}--model${R} NAME        Whisper model (default: large-v3)
+${C}OPTIONS${R}
+
+  ${B}Accepted by run, convert, sentences and probe${R}
+    ${C}BOOKDIR${R}               the book's directory: the EPUB and the audio.  The
+                          audio may sit loose in it or in one subdirectory.
+    ${C}--dir${R} DIR             the same thing, named rather than positional
+    ${C}--epub${R} FILE           use this EPUB or PDF, instead of searching BOOKDIR
+    ${C}--audio${R} DIR           use this audio directory, instead of searching
+    ${C}-l, --lang${R} CODE       de, ja, pl, ru, en, fr, es, it, nl, zh.  Read from
+                          the EPUB's own metadata when omitted.
+
+  ${B}run${R} — the whole pipeline ${D}(the default; the word may be left out)${R}
+    ${C}-n, --dry-run${R}         plan only.  Converts nothing, deletes nothing,
+                          writes nothing — it aligns and reports so you can see
+                          what would happen.  On an unconverted book it aligns
+                          against the MP3s and says the timings will shift.
+    ${C}-o, --out${R} DIR         write the SRTs here instead of beside each audio
+                          file.  Beside is the default because that is what
+                          makes the app attach them by itself.
+    ${C}--keep-mp3${R}            do not convert MP3 to M4B at all
+    ${C}-d, --delete-mp3${R}      ${E}DESTRUCTIVE${R}: delete each MP3 once its own M4B is
+                          verified.  Asks first — see DELETING THE MP3s.
+    ${C}-y, --yes${R}             answer that question with yes, for unattended runs
+    ${C}--convert-to${R} DIR      put converted audio somewhere other than beside
+                          the MP3 it came from
+    ${C}--jobs${R} N              how many files to convert at once
+                          ${D}(default: one per core, up to 16)${R}
+    ${C}--model${R} NAME          Whisper model ${D}(default: large-v3)${R}
     ${C}--device${R} auto|cuda|cpu
-    ${C}--batch-size${R} N      Whisper batch size (default: 32)
-    ${C}--no-refine${R}         skip snapping cue ends into pauses
-    ${C}--force${R}             ignore cached transcripts and redo the work
-    ${C}--dry-run${R}           align and report, write nothing
-    ${C}--report${R} FILE       save the run report
-    ${C}--json${R} FILE         save a machine-readable report
-    ${C}-v, --verbose${R}
+                          ${D}(default: auto — CUDA when CTranslate2 sees a GPU)${R}
+    ${C}--batch-size${R} N        Whisper batch size ${D}(default: 32)${R}
+    ${C}--beam-size${R} N         Whisper beam size ${D}(default: 1)${R}
+    ${C}--cache-dir${R} DIR       where transcripts and voice-activity results live
+                          ${D}(default: ~/.cache/jisho-subs)${R}
+    ${C}--no-refine${R}           skip snapping cue ends into the narrator's pauses
+    ${C}--force${R}               ignore the cache and redo the transcription
+    ${C}--report${R} FILE         also save the run report here
+    ${C}--json${R} FILE           save a machine-readable report: every cue, its
+                          timing, its confidence, and what was dropped
+    ${C}-v, --verbose${R}         name every file as it is written
+
+  ${B}convert${R} — fix the audio format and stop
+    ${C}-d, --delete-mp3${R}      ${E}DESTRUCTIVE${R}: delete each MP3 once its M4B verifies
+    ${C}-y, --yes${R}             skip the confirmation
+    ${C}--convert-to${R} DIR      where the M4Bs go
+    ${C}--jobs${R} N              parallel conversions
+    ${C}--force${R}               re-convert even where an M4B already exists
+
+  ${B}sentences${R} — print the reference text as it will be cued
+  ${B}probe${R} — say what would be used, and do nothing
+    ${D}Both take only the common options above.  Neither needs any audio;${R}
+    ${D}sentences works from the EPUB alone.${R}
+
+  ${B}lint${R} — check SRTs against the app's parser
+    ${C}AUDIODIR${R} or ${C}FILE...${R}     a directory of .srt files, or named files
+
+  ${B}Anywhere${R}
+    ${C}-h, --help${R}            this manual
+    ${C}--version${R}             print the version
+    ${C}-s, --setup${R}           set this machine up, or check it — see
+                          SETTING UP A MACHINE
+    ${C}-s --rebuild${R}          discard the virtualenv and build it again
+
+${C}ENVIRONMENT${R}
+    ${C}JISHO_SUBS_VENV${R}       where the virtualenv lives
+                          ${D}(default: ~/venv.shiroikuma-jisho-subtitles)${R}
+    ${C}JISHO_SUBS_REPO${R}       where this checkout lives
+                          ${D}(default: ~/git/shiroikuma-jisho-subtitles)${R}
+    ${C}XDG_CACHE_HOME${R}        moves the transcript cache
+    ${C}HF_HOME${R}               moves the downloaded speech models
+    ${C}NO_COLOR${R}              plain output, no colour and no progress bar
 
 ${C}OUTPUT${R}
     One SRT per audio file, same basename, same directory.  Written to the

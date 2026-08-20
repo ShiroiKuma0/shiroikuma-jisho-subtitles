@@ -652,3 +652,42 @@ def test_nothing_is_retired_when_there_was_no_earlier_srt(tmp_path):
     stats = srt_mod.write_for_files(cues, files, str(tmp_path))
     assert stats.retired == [] and stats.replaced == 0
     assert stats.empty_files == ["intro.mp3"]
+
+
+def test_every_option_is_documented_in_the_manual():
+    """A flag nobody can discover may as well not exist."""
+    import subprocess
+    from jisho_subs.cli import build_parser
+
+    man = subprocess.run(["bash", WRAPPER, "-h"], capture_output=True, text=True,
+                         env={**os.environ, "NO_COLOR": "1"}).stdout
+    parser = build_parser()
+    subs = [a for a in parser._actions
+            if hasattr(a, "choices") and isinstance(a.choices, dict)][0]
+    undocumented = []
+    for name, sub in subs.choices.items():
+        for action in sub._actions:
+            for flag in action.option_strings:
+                if flag in ("-h", "--help"):
+                    continue
+                if flag not in man:
+                    undocumented.append(f"{name} {flag}")
+    assert not undocumented, f"not in `-h`: {undocumented}"
+
+
+def test_every_subcommand_is_documented_in_the_manual():
+    import subprocess
+    from jisho_subs.cli import build_parser
+
+    man = subprocess.run(["bash", WRAPPER, "-h"], capture_output=True, text=True,
+                         env={**os.environ, "NO_COLOR": "1"}).stdout
+    parser = build_parser()
+    subs = [a for a in parser._actions
+            if hasattr(a, "choices") and isinstance(a.choices, dict)][0]
+    assert not [n for n in subs.choices if n not in man]
+
+
+def test_dash_n_is_dry_run():
+    from jisho_subs.cli import build_parser
+    args = build_parser().parse_args(["run", "/tmp", "-n"])
+    assert args.dry_run is True

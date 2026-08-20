@@ -536,7 +536,9 @@ is in the wrapper: shiroikuma-jisho-subtitles -h
                      help="skip the confirmation prompt")
     run.add_argument("--force", action="store_true",
                      help="ignore cached transcripts and re-run ASR")
-    run.add_argument("--dry-run", action="store_true", help="do not write SRTs")
+    run.add_argument("-n", "--dry-run", action="store_true",
+                     help="plan only: convert nothing, delete nothing, write "
+                          "nothing")
     run.add_argument("--report", help="write the run report to this file")
     run.add_argument("--json", help="write a machine-readable report here")
     run.add_argument("-v", "--verbose", action="store_true")

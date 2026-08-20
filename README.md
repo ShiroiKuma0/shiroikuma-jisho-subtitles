@@ -83,7 +83,7 @@ shiroikuma-jisho-subtitles BOOKDIR -d               # …and delete the MP3s aft
 shiroikuma-jisho-subtitles BOOKDIR -d -y            # …without being asked
 shiroikuma-jisho-subtitles BOOKDIR --keep-mp3       # do not convert to M4B
 shiroikuma-jisho-subtitles BOOKDIR --report r.txt   # keep the run report
-shiroikuma-jisho-subtitles BOOKDIR --dry-run        # align, report, write nothing
+shiroikuma-jisho-subtitles BOOKDIR -n                # plan only, change nothing
 
 shiroikuma-jisho-subtitles convert   BOOKDIR        # only MP3 → M4B, then stop
 shiroikuma-jisho-subtitles sentences BOOKDIR        # the text, as it will be cued

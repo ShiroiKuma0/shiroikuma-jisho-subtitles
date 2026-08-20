@@ -117,8 +117,9 @@ shiroikuma-jisho-subtitles ~/tmp/subtitles/1        # ~/0/bin, wraps the venv
 ~/venv.shiroikuma-jisho-subtitles/bin/python -m pytest -q
 ```
 
-`bin/shiroikuma-jisho-subtitles` carries the full `-h`; keep it in step with the
-argparse options when adding flags.
+`bin/shiroikuma-jisho-subtitles` carries the full `-h`. Two tests enforce that
+every subcommand and every option appears in it, so a new flag fails the suite
+until it is documented — a flag nobody can discover may as well not exist.
 
 `-s` (setup/verify) lives in the wrapper rather than in argparse because it has
 to run on a machine with no virtualenv — it cannot go through the venv's Python.
